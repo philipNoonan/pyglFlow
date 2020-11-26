@@ -14,8 +14,8 @@ from pathlib import Path
 
 def do_edgeFilter(edgeShader, imageTex, outImage, frame, width, height):
     glUseProgram(edgeShader)
-    glBindImageTexture(0, imageTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8UI)    
-    glBindImageTexture(1, outImage, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F)    
+    glBindImageTexture(0, imageTex, 0, GL_FALSE, 0, GL_READ_ONLY, GL_R8UI)
+    glBindImageTexture(1, outImage, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F)
 
     lesserID = glGetUniformLocation(edgeShader, "lesser")
     upperID = glGetUniformLocation(edgeShader, "upper")
@@ -41,9 +41,9 @@ def read_texture_memory(imageTex, width, height):
     glBindTexture(GL_TEXTURE_2D, imageTex)
     newImages = glGetTexImageub(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT)
     glBindTexture(GL_TEXTURE_2D, 0)
-    
+
     newImages.reshape((width, height, 4))
-    print(newImages)	
+    print(newImages)
 
 def createTexture(texture, target, internalFormat, levels, width, height, depth, minFilter, magFilter):
     print ('name : ', texture)
@@ -72,19 +72,19 @@ def createTexture(texture, target, internalFormat, levels, width, height, depth,
     elif target == GL_TEXTURE_2D:
         glTexStorage2D(target, levels, internalFormat, width, height)
     elif target == GL_TEXTURE_3D or depth > 1:
-        glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER)	
+        glTexParameteri(target, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_BORDER)
         glTexStorage3D(target, levels, internalFormat, width, height, depth)
 
-    return texName	
+    return texName
 
 def reset():
-    try: 
+    try:
         cap
     except NameError:
-        print('')        
+        print('')
     else:
         cap.release()
-    
+
 def openVideo(filename):
     cap = cv2.VideoCapture(filename)
     height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
@@ -108,7 +108,7 @@ def generateTextures(hyperspectralDataTexture, processedTexture, numImages, widt
 
 
 	# Allocate the immutable GPU memory storage -more efficient than mutable memory if you are not going to change image size after creation
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);	
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glPixelStorei(GL_UNPACK_ROW_LENGTH, int(width))
 
 
@@ -117,7 +117,7 @@ def generateTextures(hyperspectralDataTexture, processedTexture, numImages, widt
 
 def main():
 
-    # NAMED TEXTURES    
+    # NAMED TEXTURES
     hyperspectralDataTexture = -1
     processedTexture = -1
 
@@ -133,7 +133,7 @@ def main():
         return
 
     glfw.make_context_current(window)
-	
+
     imgui.create_context()
     impl = GlfwRenderer(window)
     #           positions        colors          texture coords
@@ -149,15 +149,15 @@ def main():
 
     indices = np.array(indices, dtype= np.uint32)
 
-    vertex_shader = Path('../shaders/screenQuad.vert').read_text()
+    vertex_shader = (Path(__file__).parent.parent / 'shaders/screenQuad.vert').read_text()
 
-    fragment_shader = Path('../shaders/screenQuad.frag').read_text()
+    fragment_shader = (Path(__file__).parent.parent / 'shaders/screenQuad.frag').read_text()
 
     shader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(vertex_shader, GL_VERTEX_SHADER),
                                               OpenGL.GL.shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
 
 
-    edge_shader = Path('../shaders/gradient.comp').read_text()
+    edge_shader = (Path(__file__).parent.parent / 'shaders/gradient.comp').read_text()
 
     edgeShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(edge_shader, GL_COMPUTE_SHADER))
 
@@ -165,7 +165,7 @@ def main():
     # set up VAO and VBO for full screen quad drawing calls
     VAO = glGenVertexArrays(1)
     glBindVertexArray(VAO)
-	
+
     VBO = glGenBuffers(1)
     glBindBuffer(GL_ARRAY_BUFFER, VBO)
     glBufferData(GL_ARRAY_BUFFER, 128, quad, GL_STATIC_DRAW)
@@ -187,16 +187,16 @@ def main():
     sliderB_loc = glGetUniformLocation(shader, "sliderB")
     renderType_loc = glGetUniformLocation(shader, "renderType")
 
-    
+
     # make some default background color
     glClearColor(0.2, 0.3, 0.2, 1.0)
-    
+
     # set some values
-    sliderRValue = 0		
-    sliderGValue = 0		
+    sliderRValue = 0
+    sliderGValue = 0
     sliderBValue = 0
 
-    frameCounter = 0		
+    frameCounter = 0
 
     #default to not running any filters
     doFilterEnabled = False
@@ -210,15 +210,15 @@ def main():
 
     currentCamera = 0
     cameraList = ['0', '1', '2', '3', '4']
-    resetVideoSource = True    
+    resetVideoSource = True
     sourceAvailable = False
-    
+
     global cap
 
     filemode = 0 # 1 : webcam, 2 : video file
-  	
-    numberOfImages = 1000 
-	
+
+    numberOfImages = 1000
+
     hyperspectralDataTexture = -1
     processedTexture = -1
     width = 0
@@ -256,13 +256,13 @@ def main():
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
 
-                img_data = np.array(gray.data, np.uint8)		
+                img_data = np.array(gray.data, np.uint8)
                 glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, frameCounter, int(width), int(height), 1, GL_RED, GL_UNSIGNED_BYTE, img_data)
 
                 w, h = glfw.get_framebuffer_size(window)
 
                 # set the active drawing viewport within the current GLFW window (i.e. we are spliiting it up in 3 cols)
-                glViewport(0,0,int(w/3),h)		
+                glViewport(0,0,int(w/3),h)
                 glClear(GL_COLOR_BUFFER_BIT)
 
                 glUseProgram(shader)
@@ -272,8 +272,8 @@ def main():
                 glUniform1i(sliderB_loc, frameCounter)
                 glUniform1i(renderType_loc, 0)
 
-                #glPolygonMode(GL_FRONT_AND_BACK, GL_LINE );	
-                # DRAW THE FIRST WINDOW (live feed)	
+                #glPolygonMode(GL_FRONT_AND_BACK, GL_LINE );
+                # DRAW THE FIRST WINDOW (live feed)
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
                 glUniform1i(sliderB_loc, sliderBValue)
@@ -282,17 +282,17 @@ def main():
                 glUniform1i(renderType_loc, 0)
 
                 # set second draw call's drawing location (we've shifted accros by width / 3)
-                glViewport(int(w/3),0,int(w/3),h)		
+                glViewport(int(w/3),0,int(w/3),h)
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
-        
+
                 # set third draw call's drawing location (we've shifted accros by 2 * width / 3)
-                glViewport(int(2*w/3),0,int(w/3),h)	
+                glViewport(int(2*w/3),0,int(w/3),h)
                 glUniform1i(renderType_loc, 1)
-        
+
                 # we want to now render from the processed texture, whose memory has been populated by the edgeFilter compute shader
                 glActiveTexture(GL_TEXTURE1)
                 glBindTexture(GL_TEXTURE_2D, processedTexture)
-        
+
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
             elif ret == False and filemode == 2:
@@ -334,17 +334,17 @@ def main():
         changedG, sliderGValue = imgui.slider_int("sliceG", sliderGValue, min_value=0, max_value=numberOfImages)
         changedB, sliderBValue = imgui.slider_int("sliceB", sliderBValue, min_value=0, max_value=numberOfImages)
         _, doFilterEnabled = imgui.checkbox("run filter", doFilterEnabled)
-    
+
         if (doFilterEnabled):
             do_edgeFilter(edgeShader, hyperspectralDataTexture, processedTexture, frameCounter, width, height)
 
         _, filemodeCheck = imgui.checkbox("", doFilterEnabled)
 
 
-        imgui.end()		
+        imgui.end()
 
-        imgui.render()	
-	
+        imgui.render()
+
         impl.render(imgui.get_draw_data())
 
         glfw.swap_buffers(window)

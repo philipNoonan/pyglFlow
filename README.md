@@ -1,28 +1,24 @@
 # pyglFlow
 An openGL GLSL implementation of Stuff TBD Using a python front end
 
-<h2>Installation</h2>
+## Installation
 
 Tested running on win10 with python 3.8 x64
 
-<h3>Dependencies</h3>
-
-```
-pip install glfw
-pip install PyOpenGL
-pip install opencv-python
-pip install imgui
+```shell
+$ pip install git+https://github.com/philipNoonan/pyglFlow.git
 ```
 
-<h3> Using pyglFlow </h3>
+## Using pyglFlow
 
 ```
 mkdir data
 ```
+
 Place any video you want to play with into the /data folder.
+
 ```
-cd src
-python pyglFlow.py
+$ pyglFlow
 ```
 
 This opens a black window, with a menu allowing you to choose between Use Camera, and Select Video File. Either option prompts a new drop down list of camera IDs (click to choose 0 for default) or available video files found in the /data directory.
