@@ -149,15 +149,15 @@ def main():
 
     indices = np.array(indices, dtype= np.uint32)
 
-    vertex_shader = (Path(__file__).parent.parent / 'shaders/screenQuad.vert').read_text()
+    vertex_shader = (Path(__file__).parent / 'shaders/screenQuad.vert').read_text()
 
-    fragment_shader = (Path(__file__).parent.parent / 'shaders/screenQuad.frag').read_text()
+    fragment_shader = (Path(__file__).parent / 'shaders/screenQuad.frag').read_text()
 
     shader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(vertex_shader, GL_VERTEX_SHADER),
                                               OpenGL.GL.shaders.compileShader(fragment_shader, GL_FRAGMENT_SHADER))
 
 
-    edge_shader = (Path(__file__).parent.parent / 'shaders/gradient.comp').read_text()
+    edge_shader = (Path(__file__).parent / 'shaders/gradient.comp').read_text()
 
     edgeShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(edge_shader, GL_COMPUTE_SHADER))
 
