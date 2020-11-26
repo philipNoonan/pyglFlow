@@ -25,7 +25,6 @@ setup(
     include_package_data=True,
     name='pyglflow',
     packages=find_packages('.'),
-    include_package_data=True,
     setup_requires=[],
     test_suite='tests',
     tests_require=[],
