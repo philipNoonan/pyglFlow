@@ -14,7 +14,7 @@ requirements = [
 
 setup(
     author='PN',
-    author_email='fernando.perezgarcia.17@ucl.ac.uk',
+    author_email='philip.noonan@kcl.ac.uk',
     python_requires='>=3.6',
     entry_points={
         'console_scripts': [
