@@ -1,0 +1,3 @@
+include pyglflow/shaders/*.comp
+include pyglflow/shaders/*.vert
+include pyglflow/shaders/*.frag
