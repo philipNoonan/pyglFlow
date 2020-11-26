@@ -46,18 +46,13 @@ def read_texture_memory(imageTex, width, height):
     print(newImages)
 
 def createTexture(texture, target, internalFormat, levels, width, height, depth, minFilter, magFilter):
-    print ('name : ', texture)
 
     if texture == -1:
         texName = glGenTextures(1)
-        print ('here : ', texName)
     else:
         glDeleteTextures(int(texture))
-        print ('errr : ')
-
         texName = texture
         texName = glGenTextures(1)
-        print ('post : ', texName)
 
     glBindTexture(target, texName)
     #texture wrapping params
@@ -66,7 +61,6 @@ def createTexture(texture, target, internalFormat, levels, width, height, depth,
     #texture filtering params
     glTexParameteri(target, GL_TEXTURE_MIN_FILTER, minFilter)
     glTexParameteri(target, GL_TEXTURE_MAG_FILTER, magFilter)
-    print(texName, target, internalFormat, levels, width, height, depth, minFilter, magFilter)
     if target == GL_TEXTURE_1D:
         glTexStorage1D(target, levels, internalFormat, width)
     elif target == GL_TEXTURE_2D:
