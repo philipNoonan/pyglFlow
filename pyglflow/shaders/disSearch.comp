@@ -1,0 +1,175 @@
+#version 430
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+layout(binding = 0) uniform sampler2D lastColorMap;
+layout(binding = 1) uniform sampler2D nextColorMap;
+
+layout(binding = 0, rg32f) uniform image2D lastGradientMap;
+layout(binding = 1, rgba32f) uniform image2D flowMap;
+layout(binding = 2, rgba32f) uniform image2D sparseFlowMap;
+
+//layout(binding = 3, rgba32f) uniform image2D testMap;
+
+layout(binding = 3, rgba32f) uniform image2D flowToWipe;
+layout(binding = 4, rgba32f) uniform image2D lastFlowMap;
+
+uniform int level;
+uniform vec2 invImageSize;
+uniform vec2 invPreviousImageSize;
+
+float INF = 1e10f;
+float EPS = 0.001f;
+
+float luminance(vec3 rgb)
+{
+    return (0.299f * float(rgb.x) + 0.587f * float(rgb.y) + 0.114f * float(rgb.z));
+}
+
+
+void main()
+{
+    ivec2 pixSparse = ivec2(gl_GlobalInvocationID.xy);
+	vec2 denseTexSize = vec2(textureSize(lastColorMap, level).xy);
+
+	ivec2 pix = (pixSparse * ivec2(4, 4));
+	vec2 pixCenter = vec2(pix) + 0.5f;
+
+	float lastImageData[8][8];
+	float nextImageData[8][8];
+
+	vec2 gradData[8][8];
+
+	float templateSum = 0.0f;
+	vec2 gradSum = vec2(0.0f);
+
+	float patchSize = 8;
+
+	mat2 H = mat2(0.0f);
+
+	for (int i = 0; i < patchSize; i++)
+	{
+		for (int j = 0; j < patchSize; j++)
+		{
+		
+			imageStore(flowToWipe, ivec2(pix) + ivec2(i, j), vec4(0));
+			gradData[i][j] = -imageLoad(lastGradientMap, ivec2(pix) + ivec2(i, j)).xy;
+		
+			H[0][0] += gradData[i][j].x * gradData[i][j].x;
+			H[1][1] += gradData[i][j].y * gradData[i][j].y;
+			H[0][1] += gradData[i][j].x * gradData[i][j].y;
+
+			lastImageData[i][j] = luminance(textureLod(lastColorMap, (vec2(pixCenter + vec2(i, j))) * invImageSize, level).xyz);
+
+			templateSum += lastImageData[i][j];
+			gradSum += gradData[i][j].xy;
+		}
+	}
+
+
+	H[1][0] = H[0][1];
+
+	if (determinant(H) < 1e-8) 
+	{
+		H[0][0] += 1e-8;
+		H[1][1] += 1e-8;
+	}
+	
+	mat2 H_inv = inverse(H);
+	vec4 initialFlow;
+
+	if (level == 4)
+	{
+		initialFlow = imageLoad(lastFlowMap, pix);
+	}
+	else
+	{
+		initialFlow = imageLoad(flowMap, (pix / 2));
+	}
+	if (!isnan(initialFlow.z) || initialFlow.z != 0 || isinf(initialFlow.z))
+	{
+		initialFlow.xy /= initialFlow.z; // weighted flow in range 0 - 1 for tex size
+	}
+	if (any(isnan(initialFlow.xy)))
+	{
+		initialFlow.xy = vec2(0);
+	}
+	//
+	initialFlow.xy *= (denseTexSize);// * invPreviousImageSize); // previously found flow scaled to this levels width/height
+
+	vec2 flow = initialFlow.xy;
+
+	//		imageStore(testMap, pixSparse, vec4(initialFlow.xyz, 1));
+
+
+	//if (flow.x > 1)
+	//{
+	//	flow = vec2(0.0f);
+	//}
+
+
+	float meanDiff, firstMeanDiff;
+
+	for (int iter = 0; iter < level + 4; iter++)
+	{
+		vec2 du = vec2(0.0f);
+		float warpedSum = 0.0f;
+		vec2 flowNorm = flow * invImageSize;
+
+		for (int i = 0; i < patchSize; i++)
+		{
+			for (int j = 0; j < patchSize; j++)
+			{
+				vec2 tc = pixCenter + vec2(i, j); 
+				float warped = luminance(textureLod(nextColorMap, vec2(tc  * invImageSize) + flowNorm, level).xyz);
+				du += gradData[i][j] * (warped - lastImageData[i][j]);
+				warpedSum += warped;
+				imageStore(flowToWipe, ivec2(pix) + ivec2(i, j), vec4(du.xy, 0, 1));
+
+			}
+		}
+
+
+
+		meanDiff = (warpedSum - templateSum) * (1.0f / float(patchSize * patchSize));
+
+
+		if (iter == 0)
+		{
+			firstMeanDiff = meanDiff;
+		}
+
+		if (iter > 0 && (meanDiff > firstMeanDiff || meanDiff < 0.01f))
+		{
+			break;
+		}
+		
+		du -= gradSum * meanDiff;
+
+		flow -= H_inv * du;
+
+	} // loop
+
+	
+	vec2 newPatchCenter = (pix + 0.5f) + patchSize * 0.5f + flow;
+
+    if (length(flow - initialFlow.xy) > (patchSize * 0.5f) ||
+        newPatchCenter.x < -(patchSize * 0.5f) ||
+        denseTexSize.x - newPatchCenter.x < -(patchSize * 0.5f) ||
+        newPatchCenter.y < -(patchSize * 0.5f) ||
+        denseTexSize.y - newPatchCenter.y < -(patchSize * 0.5f)) {
+            flow = vec2(0);//initialFlow.xy;
+            meanDiff = 0;//firstMeanDiff;
+    }
+	
+
+    // NOTE: The mean patch diff will be for the second-to-last patch,
+    // not the true position of du. But hopefully, it will be very close.
+    flow *= invImageSize;
+
+	//imageStore(sparseFlowMap, pixSparse, vec4(flow, meanDiff, 1));
+	//imageStore(sparseFlowMap, pixSparse, vec4(0.6,0.3,0.8, 1));
+
+    //out_flow = vec3(u.x, u.y, mean_diff);
+	
+}
