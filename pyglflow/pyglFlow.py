@@ -30,8 +30,10 @@ def do_gradFilter(gradShader, imageTex, outImage, level, width, height):
     glUniform1f(normID, norm)
 
     #glUniform1i(frameID, frame)
+    xx = int(((int(width) >> level)/32.0)+0.5)
+    yy = int(((int(height) >> level)/32.0)+0.5)
 
-    glDispatchCompute(int(((int(width) >> level)/32.0)+0.5), int(((int(height) >> level)/32.0)+0.5), 1)
+    glDispatchCompute(xx, yy, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
 
 def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
@@ -58,15 +60,15 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
     glBindTexture(GL_TEXTURE_2D, textureList[1]) # next col
 
     glBindImageTexture(0, textureList[2], level, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F) # last grad
-    glBindImageTexture(1, textureList[4], level + 1, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # flow
+    glBindImageTexture(1, textureList[5], int(level + 1), GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # flow
     glBindImageTexture(2, textureList[6], level, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F) # sparse flow
 
 
-    glBindImageTexture(3, textureList[4], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) # flow to wipe (last flow)
-    glBindImageTexture(4, textureList[5], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # last flow
+    glBindImageTexture(3, textureList[5], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) # flow to wipe next flow (densified flow)
+    glBindImageTexture(4, textureList[4], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # last flow
 
-    sparseWidth = (int(width) >> level) / 2
-    sparseHeight = (int(height) >> level) / 2
+    sparseWidth = (int(width / 4) >> level)
+    sparseHeight = (int(height / 4) >> level)
 
     compWidth = int((sparseWidth/32.0)+0.5)
     compHeight = int((sparseHeight/32.0)+0.5)
@@ -89,13 +91,13 @@ def do_densify(densifyShader, framebuffers, textureList, level, width, height):
 
     glEnable(GL_VERTEX_PROGRAM_POINT_SIZE)
 
-    glViewport(0,0, width >> level, height >> level)
+    glViewport(0,0, int(width + 0.5) >> level, int(height + 0.5) >> level)
 
     invDenseWidth =  1.0 / float(int(width) >> level)
     invDenseHeight = 1.0 / float(int(height) >> level)
 
-    sparseWidth = (int(width) >> level) / 2
-    sparseHeight = (int(height) >> level) / 2
+    sparseWidth = (int(width / 4) >> level)
+    sparseHeight = (int(height / 4) >> level)
 
     glUniform1i(glGetUniformLocation(densifyShader, "level"), level)
     glUniform2f(glGetUniformLocation(densifyShader, "invDenseTexSize"), invDenseWidth, invDenseHeight)
@@ -104,7 +106,7 @@ def do_densify(densifyShader, framebuffers, textureList, level, width, height):
     drawBuffs = [GL_COLOR_ATTACHMENT0]
 
 
-    glBindImageTexture(0, textureList[6], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # flow to wipe (last flow)
+    glBindImageTexture(0, textureList[6], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # sparse flow
 
 
     glUniform1i(glGetUniformLocation(densifyShader, "lastImage"), 0)
@@ -195,8 +197,8 @@ def openCamera(camera):
 def generateTextures(textureList, numImages, width, height):
 
     
-    maxLevels = 5 # FIXME
-    numLevels = 5 # FIXME TOO
+    maxLevels = 4 # FIXME
+    numLevels = 4 # FIXME TOO
     #lastColor
     textureList[0] = createTexture(textureList[0], GL_TEXTURE_2D, GL_RGBA8, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     #nextColor
@@ -210,9 +212,9 @@ def generateTextures(textureList, numImages, width, height):
     #nextFlowMap
     textureList[5] = createTexture(textureList[5], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     #sparseFlowMap
-    textureList[6] = createTexture(textureList[6], GL_TEXTURE_2D, GL_RGBA32F, maxLevels, int(width / 2), int(height / 2), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureList[6] = createTexture(textureList[6], GL_TEXTURE_2D, GL_RGBA32F, maxLevels, int(width / 4), int(height / 4), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     #densificationFlowMap
-    textureList[7] = createTexture(textureList[7], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    #textureList[7] = createTexture(textureList[7], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
  
     
@@ -227,7 +229,7 @@ def generateTextures(textureList, numImages, width, height):
 
 def generateDensificationFramebuffer(densificationFlowMap, width, height):
     
-    maxLevels = 5
+    maxLevels = 4
 
     framebuffers = np.empty(maxLevels, dtype=np.uint32)
     glCreateFramebuffers(maxLevels, framebuffers)
@@ -369,7 +371,7 @@ def main():
     showCameraDialogueOptions = False
     currentFile = 0
     fileList = []
-    listy = list(Path('../data/').glob('./*'))
+    listy = list(Path('./data/').glob('./*'))
     for x in listy:
         fileList.append(str(x))
 
@@ -428,10 +430,20 @@ def main():
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
                 glGenerateMipmap(GL_TEXTURE_2D)
 
+
+                if (doFilterEnabled):
+                    for lvl in range(3, -1, -1):
+                        do_gradFilter(gradShader, textureList[0], textureList[2], lvl, width, height)
+                        do_inverseSearch(inverseSearchShader, textureList, lvl, width, height)
+                        do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
+
                 w, h = glfw.get_framebuffer_size(window)
 
                 # set the active drawing viewport within the current GLFW window (i.e. we are spliiting it up in 3 cols)
-                glViewport(0,0,int(w/3),h)
+                xpos = 0
+                ypos = 0
+                xwidth = float(w) / 3.0
+                glViewport(int(xpos), int(ypos), int(xwidth),h)
                 glClear(GL_COLOR_BUFFER_BIT)
 
                 glUseProgram(shader)
@@ -446,8 +458,9 @@ def main():
 
 
 
-                # set second draw call's drawing location (we've shifted accros by width / 3)
-                glViewport(int(w/3),0,int(w/3),h)
+                # set second draw call's drawing location (we've shifted accros by width / 4)
+                xpos = w / 3.0                
+                glViewport(int(xpos), int(ypos), int(xwidth),h)
                 glUniform1i(renderType_loc, 1)
 
                 # we want to now render from the processed texture, whose memory has been populated by the edgeFilter compute shader
@@ -459,16 +472,26 @@ def main():
 
 
                 # set third draw call's drawing location (we've shifted accros by 2 * width / 3)
-                glViewport(int(2*w/3),0,int(w/3),h)
-                glUniform1i(renderType_loc, 1)
+                xpos = 2.0 * float(w) / 3.0
+                glViewport(int(xpos), int(ypos), int(xwidth),h)
+                glUniform1i(renderType_loc, 2)
 
-
-
-                # we want to now render from the processed texture, whose memory has been populated by the edgeFilter compute shader
                 glActiveTexture(GL_TEXTURE1)
-                glBindTexture(GL_TEXTURE_2D, textureList[4])
+                glBindTexture(GL_TEXTURE_2D, textureList[6])
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
+
+
+                # set third draw call's drawing location (we've shifted accros by 2 * width / 3)
+                # xpos = 3.0 * float(w) / 3.0
+                # glViewport(int(xpos), int(ypos), int(xwidth),h)
+                # glUniform1i(renderType_loc, 2)
+
+                # glActiveTexture(GL_TEXTURE1)
+                # glBindTexture(GL_TEXTURE_2D, textureList[5])
+
+                # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
+
 
                 # swap frame handles
                 textureList[0], textureList[1] = textureList[1], textureList[0]
@@ -516,11 +539,7 @@ def main():
         changedB, sliderBValue = imgui.slider_int("sliceB", sliderBValue, min_value=0, max_value=numberOfImages)
         _, doFilterEnabled = imgui.checkbox("run filter", doFilterEnabled)
 
-        if (doFilterEnabled):
-            for lvl in range(0, -1, -1):
-                do_gradFilter(gradShader, textureList[0], textureList[2], lvl, width, height)
-                do_inverseSearch(inverseSearchShader, textureList, lvl, width, height)
-                #do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
+
 
 
         _, filemodeCheck = imgui.checkbox("", doFilterEnabled)

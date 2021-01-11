@@ -78,13 +78,14 @@ void main()
 	mat2 H_inv = inverse(H);
 	vec4 initialFlow;
 
-	if (level == 4)
+	if (level == 3)
 	{
 		initialFlow = imageLoad(lastFlowMap, pix);
 	}
 	else
 	{
-		initialFlow = imageLoad(flowMap, (pix / 2));
+		initialFlow = imageLoad(flowMap, (pix / 2) + 2);
+
 	}
 	if (!isnan(initialFlow.z) || initialFlow.z != 0 || isinf(initialFlow.z))
 	{
@@ -95,7 +96,7 @@ void main()
 		initialFlow.xy = vec2(0);
 	}
 	//
-	initialFlow.xy *= (denseTexSize);// * invPreviousImageSize); // previously found flow scaled to this levels width/height
+			initialFlow.xy *= (denseTexSize);// * invPreviousImageSize); // previously found flow scaled to this levels width/height
 
 	vec2 flow = initialFlow.xy;
 
@@ -109,6 +110,7 @@ void main()
 
 
 	float meanDiff, firstMeanDiff;
+	//for (int iter = 0; iter < level + 4; iter++)
 
 	for (int iter = 0; iter < level + 4; iter++)
 	{
@@ -124,8 +126,6 @@ void main()
 				float warped = luminance(textureLod(nextColorMap, vec2(tc  * invImageSize) + flowNorm, level).xyz);
 				du += gradData[i][j] * (warped - lastImageData[i][j]);
 				warpedSum += warped;
-				imageStore(flowToWipe, ivec2(pix) + ivec2(i, j), vec4(du.xy, 0, 1));
-
 			}
 		}
 
@@ -167,7 +167,7 @@ void main()
     // not the true position of du. But hopefully, it will be very close.
     flow *= invImageSize;
 
-	//imageStore(sparseFlowMap, pixSparse, vec4(flow, meanDiff, 1));
+	imageStore(sparseFlowMap, pixSparse, vec4(flow, meanDiff, 1));
 	//imageStore(sparseFlowMap, pixSparse, vec4(0.6,0.3,0.8, 1));
 
     //out_flow = vec3(u.x, u.y, mean_diff);

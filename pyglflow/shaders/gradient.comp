@@ -54,6 +54,6 @@
         float sy = (lesser * a00 + upper * a10 + lesser * a20)
                 -(lesser * a02 + upper * a12 + lesser * a22);
 
-
         imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(sx * normVal, sy * normVal, 0, 0));
+
     }
