@@ -43,7 +43,7 @@ void main()
 	float templateSum = 0.0f;
 	vec2 gradSum = vec2(0.0f);
 
-	float patchSize = 8;
+	float patchSize = 8.0f;
 
 	mat2 H = mat2(0.0f);
 
@@ -84,7 +84,7 @@ void main()
 	}
 	else
 	{
-		initialFlow = imageLoad(flowMap, (pix / 2) + 2);
+		initialFlow = imageLoad(flowMap, (pix / 2));
 
 	}
 	if (!isnan(initialFlow.z) || initialFlow.z != 0 || isinf(initialFlow.z))
@@ -97,7 +97,7 @@ void main()
 	}
 	//
 			initialFlow.xy *= (denseTexSize);// * invPreviousImageSize); // previously found flow scaled to this levels width/height
-
+		
 	vec2 flow = initialFlow.xy;
 
 	//		imageStore(testMap, pixSparse, vec4(initialFlow.xyz, 1));
@@ -168,7 +168,7 @@ void main()
     flow *= invImageSize;
 
 	imageStore(sparseFlowMap, pixSparse, vec4(flow, meanDiff, 1));
-	//imageStore(sparseFlowMap, pixSparse, vec4(0.6,0.3,0.8, 1));
+	//imageStore(sparseFlowMap, pixSparse, vec4(0.1,0.1,0.1, 1));
 
     //out_flow = vec3(u.x, u.y, mean_diff);
 	

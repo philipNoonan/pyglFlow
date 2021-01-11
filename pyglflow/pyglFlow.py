@@ -12,10 +12,18 @@ from pathlib import Path
 
 
 
-def do_gradFilter(gradShader, imageTex, outImage, level, width, height):
+def do_gradFilter(gradShader, textureList, level, width, height):
     glUseProgram(gradShader)
-    glBindImageTexture(0, imageTex, level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA8UI)
-    glBindImageTexture(1, outImage, level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F)
+
+    glUniform1i(glGetUniformLocation(gradShader, "colorTex"), 0)
+    glActiveTexture(GL_TEXTURE0)
+    glBindTexture(GL_TEXTURE_2D, textureList[0]) # last col
+
+    lvlID = glGetUniformLocation(gradShader, "level")
+    glUniform1i(lvlID, level)
+
+
+    glBindImageTexture(0, textureList[2], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RG32F)
 
     lesserID = glGetUniformLocation(gradShader, "lesser")
     upperID = glGetUniformLocation(gradShader, "upper")
@@ -46,12 +54,19 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
 
     glUseProgram(inverseSearchShader)
 
-    glUniform1i(glGetUniformLocation(inverseSearchShader, "lastColorMap"), 0)
-    glUniform1i(glGetUniformLocation(inverseSearchShader, "nextColorMap"), 1)
+    lcID = glGetUniformLocation(inverseSearchShader, "lastColorMap")
+    glUniform1i(lcID, 0)
+    ncID = glGetUniformLocation(inverseSearchShader, "nextColorMap")
+    glUniform1i(ncID, 1)
 
-    glUniform1i(glGetUniformLocation(inverseSearchShader, "level"), level)
-    glUniform2f(glGetUniformLocation(inverseSearchShader, "invImageSize"), invDenseWidth, invDenseHeight)
-    glUniform2f(glGetUniformLocation(inverseSearchShader, "invPreviousImageSize"), invPrevDenseWidth, invPrevDenseHeight)
+    lvlID = glGetUniformLocation(inverseSearchShader, "level")
+    glUniform1i(lvlID, level)
+
+    iisID = glGetUniformLocation(inverseSearchShader, "invImageSize")
+    glUniform2f(iisID, invDenseWidth, invDenseHeight)
+
+    #ipisID = glGetUniformLocation(inverseSearchShader, "invPreviousImageSize")
+    #glUniform2f(ipisID, invPrevDenseWidth, invPrevDenseHeight)
 
 
     glActiveTexture(GL_TEXTURE0)
@@ -60,12 +75,12 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
     glBindTexture(GL_TEXTURE_2D, textureList[1]) # next col
 
     glBindImageTexture(0, textureList[2], level, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F) # last grad
-    glBindImageTexture(1, textureList[5], int(level + 1), GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # flow
+    glBindImageTexture(1, textureList[4], int(level + 1), GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # flow to read from
     glBindImageTexture(2, textureList[6], level, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F) # sparse flow
 
 
-    glBindImageTexture(3, textureList[5], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) # flow to wipe next flow (densified flow)
-    glBindImageTexture(4, textureList[4], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # last flow
+    glBindImageTexture(3, textureList[4], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) # flow to wipe next flow (densified flow)
+    glBindImageTexture(4, textureList[5], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # last flow
 
     sparseWidth = (int(width / 4) >> level)
     sparseHeight = (int(height / 4) >> level)
@@ -84,7 +99,7 @@ def do_densify(densifyShader, framebuffers, textureList, level, width, height):
     glBindFramebuffer(GL_FRAMEBUFFER, framebuffers[level])
 
 
-   # glDisable(GL_DEPTH_TEST)
+    #glDisable(GL_DEPTH_TEST)
 
     glEnable(GL_BLEND)
     glBlendFunc(GL_ONE, GL_ONE)
@@ -126,7 +141,7 @@ def do_densify(densifyShader, framebuffers, textureList, level, width, height):
     glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
 
-   # glEnable(GL_DEPTH_TEST)
+    #glEnable(GL_DEPTH_TEST)
     glDisable(GL_BLEND)
     glDisable(GL_VERTEX_PROGRAM_POINT_SIZE)
 
@@ -421,7 +436,7 @@ def main():
                 glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
                 glActiveTexture(GL_TEXTURE0)
-                glBindTexture(GL_TEXTURE_2D, textureList[0])
+                glBindTexture(GL_TEXTURE_2D, textureList[1])
 
                 #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -433,7 +448,7 @@ def main():
 
                 if (doFilterEnabled):
                     for lvl in range(3, -1, -1):
-                        do_gradFilter(gradShader, textureList[0], textureList[2], lvl, width, height)
+                        do_gradFilter(gradShader, textureList, lvl, width, height)
                         do_inverseSearch(inverseSearchShader, textureList, lvl, width, height)
                         do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
 
@@ -477,7 +492,7 @@ def main():
                 glUniform1i(renderType_loc, 2)
 
                 glActiveTexture(GL_TEXTURE1)
-                glBindTexture(GL_TEXTURE_2D, textureList[6])
+                glBindTexture(GL_TEXTURE_2D, textureList[5])
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 

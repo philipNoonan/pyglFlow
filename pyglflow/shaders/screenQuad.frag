@@ -24,12 +24,12 @@
 
         }
         else if (renderType == 1) {
-            col.xy = textureLod(samplerProcessedTex, outTexCoords, float(sliderR)).xy * 1.0f;
+            col.xy = textureLod(samplerProcessedTex, outTexCoords, float(sliderR)).xy * 10.0f;
 
         }
         else if (renderType == 2) {
             
-            col.xy = textureLod(samplerProcessedTex, outTexCoords, float(sliderR)).xy * 1.0f;
+            col.xy = textureLod(samplerProcessedTex, outTexCoords, float(sliderR)).xy * 10.0f;
             float mag = sqrt(col.x * col.x + col.y * col.y);
             float ang = atan(col.x, col.y);
 
