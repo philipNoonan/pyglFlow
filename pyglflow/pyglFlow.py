@@ -10,6 +10,16 @@ import imgui
 from imgui.integrations.glfw import GlfwRenderer
 from pathlib import Path
 
+import json
+import trt_pose.coco
+import torch2trt
+import torch
+from torch2trt import TRTModule
+import torchvision.transforms as transforms
+import PIL.Image
+from trt_pose.draw_objects import DrawObjects
+from trt_pose.parse_objects import ParseObjects
+import time
 
 
 def do_gradFilter(gradShader, textureList, level, width, height):
@@ -229,7 +239,7 @@ def generateTextures(textureList, numImages, width, height):
     #sparseFlowMap
     textureList[6] = createTexture(textureList[6], GL_TEXTURE_2D, GL_RGBA32F, maxLevels, int(width / 4), int(height / 4), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     #densificationFlowMap
-    #textureList[7] = createTexture(textureList[7], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureList[7] = createTexture(textureList[7], GL_TEXTURE_2D, GL_RGBA8, 1, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
  
     
@@ -274,9 +284,45 @@ def generateDensificationFramebuffer(densificationFlowMap, width, height):
     return framebuffers
 
 
-
+def preprocess(image, mean, std):
+    global device
+    device = torch.device('cuda')
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    image = PIL.Image.fromarray(image)
+    image = transforms.functional.to_tensor(image).to(device)
+    image.sub_(mean[:, None, None]).div_(std[:, None, None])
+    return image[None, ...]
 
 def main():
+
+    with open('./models/human_pose.json', 'r') as f:
+        human_pose = json.load(f)
+    
+    topology = trt_pose.coco.coco_category_to_topology(human_pose)
+
+    WIDTH = 256
+    HEIGHT = 256
+
+    #data = torch.zeros((1, 3, HEIGHT, WIDTH)).cuda()
+
+    OPTIMIZED_MODEL = Path('./models/densenet121_baseline_att_256x256_B_epoch_160_trt.pth')
+
+    model_trt = TRTModule()
+    model_trt.load_state_dict(torch.load(OPTIMIZED_MODEL))
+
+    print('loaded model')
+
+    mean = torch.Tensor([0.485, 0.456, 0.406]).cuda()
+    std = torch.Tensor([0.229, 0.224, 0.225]).cuda()
+    device = torch.device('cuda')
+
+    parse_objects = ParseObjects(topology)
+    draw_objects = DrawObjects(topology)
+
+
+
+
+
 
     # NAMED TEXTURES
     lastColor = -1            # 0
@@ -286,11 +332,12 @@ def main():
     lastFlowMap = -1          # 4
     nextFlowMap = -1          # 5
     sparseFlowMap = -1        # 6
-    densificationFlowMap = -1 # 7
+    #densificationFlowMap = -1 # 7
+    skeletonColor = -1        # 7
 
 
 
-    textureList = [lastColor, nextColor, lastGradMap, nextGradMap, lastFlowMap, nextFlowMap, sparseFlowMap, densificationFlowMap]
+    textureList = [lastColor, nextColor, lastGradMap, nextGradMap, lastFlowMap, nextFlowMap, sparseFlowMap, skeletonColor]
 
     densifiactionFBO = -1
 
@@ -382,6 +429,7 @@ def main():
 
     #default to not running any filters
     doFilterEnabled = False
+    getPose = False
     showFileDialogueOptions = False
     showCameraDialogueOptions = False
     currentFile = 0
@@ -399,12 +447,12 @@ def main():
 
     filemode = 0 # 1 : webcam, 2 : video file
 
-    numberOfImages = 1000
+    numberOfImages = 5
 
     width = 0
     height = 0
 
-
+    numberOfFrames = 1
 
 
 
@@ -421,6 +469,8 @@ def main():
                     cap, width, height = openCamera(cameraList[currentCamera])
                 elif filemode == 2:
                     cap, width, height = openVideo(fileList[currentFile])
+                    numberOfFrames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+
 
                 textureList = generateTextures(textureList, numberOfImages, width, height)
                 densifiactionFBO = generateDensificationFramebuffer(textureList[5], width, height)
@@ -440,10 +490,26 @@ def main():
 
                 #gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-
                 img_data = np.array(frame.data, np.uint8)
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
                 glGenerateMipmap(GL_TEXTURE_2D)
+
+                #cv2.imshow('frame', frame)
+
+                if getPose:
+                    imageSmall = cv2.resize(frame, (WIDTH, HEIGHT))
+                    data = preprocess(imageSmall, mean, std)
+                    cmap, paf = model_trt(data)
+                    cmap, paf = cmap.detach().cpu(), paf.detach().cpu()
+                    counts, objects, peaks = parse_objects(cmap, paf)#, cmap_threshold=0.15, link_threshold=0.15)
+                    draw_objects(frame, counts, objects, peaks)
+                    #print(counts)
+                    #cv2.imshow('fr', frame)
+                    glActiveTexture(GL_TEXTURE0)
+                    glBindTexture(GL_TEXTURE_2D, textureList[7])
+                    img_data = np.array(frame.data, np.uint8)
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
+
 
 
                 if (doFilterEnabled):
@@ -453,6 +519,8 @@ def main():
                         do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
 
                 w, h = glfw.get_framebuffer_size(window)
+
+
 
                 # set the active drawing viewport within the current GLFW window (i.e. we are spliiting it up in 3 cols)
                 xpos = 0
@@ -469,6 +537,12 @@ def main():
 
                 #glPolygonMode(GL_FRONT_AND_BACK, GL_LINE );
                 # DRAW THE FIRST WINDOW (live feed)
+                glActiveTexture(GL_TEXTURE0)
+                if getPose:
+                    glBindTexture(GL_TEXTURE_2D, textureList[7])
+                else:
+                    glBindTexture(GL_TEXTURE_2D, textureList[1])
+
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
 
@@ -514,9 +588,12 @@ def main():
                 textureList[4], textureList[5] = textureList[5], textureList[4]
 
 
+
+
             elif ret == False and filemode == 2:
                 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
+        sTime = time.perf_counter()
 
 
         # GUI TIME
@@ -549,16 +626,15 @@ def main():
                 frameCounter = 0
 
 
-        changedR, sliderRValue = imgui.slider_int("sliceR", sliderRValue, min_value=0, max_value=5)
-        changedG, sliderGValue = imgui.slider_int("sliceG", sliderGValue, min_value=0, max_value=numberOfImages)
-        changedB, sliderBValue = imgui.slider_int("sliceB", sliderBValue, min_value=0, max_value=numberOfImages)
+        #changedR, sliderRValue = imgui.slider_int("sliceR", sliderRValue, min_value=0, max_value=5)
+        changedG, frameCounter = imgui.slider_int("frame", frameCounter, min_value=0, max_value=numberOfFrames)
+
+        #changedB, sliderBValue = imgui.slider_int("sliceB", sliderBValue, min_value=0, max_value=numberOfImages)
         _, doFilterEnabled = imgui.checkbox("run filter", doFilterEnabled)
+        _, getPose = imgui.checkbox("run pose", getPose)
 
-
-
-
-        _, filemodeCheck = imgui.checkbox("", doFilterEnabled)
-
+        if changedG:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frameCounter)
 
         imgui.end()
 
@@ -566,11 +642,14 @@ def main():
 
         impl.render(imgui.get_draw_data())
 
+        #print((time.perf_counter() - sTime) * 1000)
+
+
         glfw.swap_buffers(window)
 
         frameCounter = frameCounter + 1
 
-        if frameCounter >= numberOfImages:
+        if frameCounter >= numberOfFrames:
             frameCounter = 0
 
 
