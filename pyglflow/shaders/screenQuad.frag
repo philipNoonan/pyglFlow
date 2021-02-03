@@ -46,7 +46,7 @@
             vec4 K = vec4(1.0f, 2.0f / 3.0f, 1.0f / 3.0f, 3.0f);
             vec3 p = abs(fract(ang + K.xyz) * 6.0 - K.www);
 
-            vec3 rgb = mix(K.xxx, clamp(p - K.xxx, 0.0f, 1.0f), mag * ((float(sliderR) + 10.0f) / 1.0f));
+            vec3 rgb = mix(K.xxx, clamp(p - K.xxx, 0.0f, 1.0f), mag * ((float(sliderR) + 1.0f) / 1.0f));
 
             col = vec4((1.0f - rgb) * 1.0f, mag > 0.5f ? (mag < 0.5 ? mag / 0.5 : 1.0) : 0.0 * 0.5);
 
