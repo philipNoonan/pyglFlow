@@ -26,14 +26,81 @@ float luminance(vec3 rgb)
     return (0.299f * float(rgb.x) + 0.587f * float(rgb.y) + 0.114f * float(rgb.z));
 }
 
+vec2 solve(float A[2][2], float b[2]) {
+	const int n = 2;
+	float L[n][n];
+    float d[n];
+    float v[n];
+    float s[n];
+
+	vec2 result;
+
+    for (int i = 0; i < n; i++) {
+        v[i] = 0.0f;
+        d[i] = 0.0f;
+        for (int j = 0; j < n; j++) {
+            L[i][j] = 0.0f;
+        }
+    }
+
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j <= i; j++) {
+            float tempSum = 0.0f;
+            for (int k = 0; k < j; k++) {
+                tempSum += L[i][k] * L[j][k];
+            }
+
+            if (i == j) {
+                L[i][j] = sqrt(A[i][i] - tempSum);
+            }
+            else {
+                L[i][j] = (1.0f / L[j][j] * (A[i][j] - tempSum));
+            }
+        }
+    }
+
+	    // forward subs
+    float z[n];
+
+    z[0] = (b[0])                        / L[0][0];
+    z[1] = (b[1] - (L[1][0] * z[0]))     / L[1][1];
+
+    // backward subs
+    float x[n];
+
+    x[1] = (z[1])                       / L[1][1];
+    x[0] = (z[0] - (L[0][1] * z[1]))    / L[0][0];
+
+    if (isnan(x[0]) || isnan(x[1])) {
+		return vec2(0.0f);
+    }
+
+    result.x = result.x - x[0];
+	result.y = result.y - x[1];
+
+	return result;
+
+}
+
+void getPatchSecondImage() {
+	
+}
 
 void main()
 {
     ivec2 pixSparse = ivec2(gl_GlobalInvocationID.xy);
+	
+	ivec2 imSize = ivec2(imageSize(sparseFlowMap));
+	if (pixSparse.x >= imSize.x || pixSparse.y >= imSize.y) {
+		return;
+	}
 	vec2 denseTexSize = vec2(textureSize(lastColorMap, level).xy);
 
 	ivec2 pix = (pixSparse * ivec2(4, 4));
-	vec2 pixCenter = vec2(pix) + 0.5f;
+	vec2 pixCenter = vec2(pix);
+
+    vec2 base = (round(vec2(pix)) - (0.5f * 8.0f - 0.5f));
 
 	float lastImageData[8][8];
 	float nextImageData[8][8];
@@ -53,13 +120,13 @@ void main()
 		{
 		
 			imageStore(flowToWipe, ivec2(pix) + ivec2(i, j), vec4(0));
-			gradData[i][j] = -imageLoad(lastGradientMap, ivec2(pix) + ivec2(i, j)).xy;
+			gradData[i][j] = -imageLoad(lastGradientMap, ivec2(base) + ivec2(i, j)).xy;
 		
 			H[0][0] += gradData[i][j].x * gradData[i][j].x;
 			H[1][1] += gradData[i][j].y * gradData[i][j].y;
 			H[0][1] += gradData[i][j].x * gradData[i][j].y;
 
-			lastImageData[i][j] = luminance(textureLod(lastColorMap, (vec2(pixCenter + vec2(i, j))) * invImageSize, level).xyz);
+			lastImageData[i][j] = luminance(textureLod(lastColorMap, (vec2(base + vec2(i, j))) * invImageSize, level).xyz);
 
 			templateSum += lastImageData[i][j];
 			gradSum += gradData[i][j].xy;
@@ -69,35 +136,43 @@ void main()
 
 	H[1][0] = H[0][1];
 
-	if (determinant(H) < 1e-8) 
+	if (determinant(H) < 1e-6) 
 	{
-		H[0][0] += 1e-8;
-		H[1][1] += 1e-8;
+		H[0][0] += 1e-6;
+		H[1][1] += 1e-6;
 	}
 	
 	mat2 H_inv = inverse(H);
-	vec4 initialFlow;
+	vec4 initialFlow = vec4(0.0f);
 
-	if (level == 3)
+
+	if (level == 4)
 	{
-		initialFlow = imageLoad(lastFlowMap, pix);
+		//initialFlow = imageLoad(lastFlowMap, pix);
+		//initialFlow.xy *= (denseTexSize); // previously found flow scaled to this levels width/height
+
 	}
 	else
 	{
-		initialFlow = imageLoad(flowMap, (pix / 2));
+		initialFlow = imageLoad(flowMap, ivec2(pix / 2));
+
+		if (!isnan(initialFlow.z) || initialFlow.z != 0 || !isinf(initialFlow.z))
+		{
+			initialFlow.xy /= initialFlow.z; // weighted flow in range 0 - 1 for tex size
+		}
+		if (any(isnan(initialFlow.xy)))
+		{
+			initialFlow.xyz = vec3(0);
+		}
+
+		initialFlow.xy *= (denseTexSize); // previously found flow scaled to this levels width/height
+
 
 	}
-	if (!isnan(initialFlow.z) || initialFlow.z != 0 || isinf(initialFlow.z))
-	{
-		initialFlow.xy /= initialFlow.z; // weighted flow in range 0 - 1 for tex size
-	}
-	if (any(isnan(initialFlow.xy)))
-	{
-		initialFlow.xy = vec2(0);
-	}
-	//
-			initialFlow.xy *= (denseTexSize);// * invPreviousImageSize); // previously found flow scaled to this levels width/height
-		
+
+	// //
+		//		initialFlow.xy = vec2(0);
+
 	vec2 flow = initialFlow.xy;
 
 	//		imageStore(testMap, pixSparse, vec4(initialFlow.xyz, 1));
@@ -112,7 +187,7 @@ void main()
 	float meanDiff, firstMeanDiff;
 	//for (int iter = 0; iter < level + 4; iter++)
 
-	for (int iter = 0; iter < level + 4; iter++)
+	for (int iter = 0; iter < 4; iter++)
 	{
 		vec2 du = vec2(0.0f);
 		float warpedSum = 0.0f;
@@ -122,7 +197,7 @@ void main()
 		{
 			for (int j = 0; j < patchSize; j++)
 			{
-				vec2 tc = pixCenter + vec2(i, j); 
+				vec2 tc = base + vec2(i, j); 
 				float warped = luminance(textureLod(nextColorMap, vec2(tc  * invImageSize) + flowNorm, level).xyz);
 				du += gradData[i][j] * (warped - lastImageData[i][j]);
 				warpedSum += warped;
@@ -139,10 +214,10 @@ void main()
 			firstMeanDiff = meanDiff;
 		}
 
-		if (iter > 0 && (meanDiff > firstMeanDiff || meanDiff < 0.01f))
-		{
-			break;
-		}
+		// if (iter > 0 && (meanDiff > firstMeanDiff || meanDiff < 0.01f))
+		// {
+		// 	break;
+		// }
 		
 		du -= gradSum * meanDiff;
 
@@ -158,8 +233,8 @@ void main()
         denseTexSize.x - newPatchCenter.x < -(patchSize * 0.5f) ||
         newPatchCenter.y < -(patchSize * 0.5f) ||
         denseTexSize.y - newPatchCenter.y < -(patchSize * 0.5f)) {
-            flow = vec2(0);//initialFlow.xy;
-            meanDiff = 0;//firstMeanDiff;
+            flow = initialFlow.xy;
+            meanDiff = firstMeanDiff;
     }
 	
 
@@ -173,3 +248,736 @@ void main()
     //out_flow = vec3(u.x, u.y, mean_diff);
 	
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// #version 430
+
+// layout(local_size_x = 4, local_size_y = 4) in;
+
+// layout(binding = 0) uniform sampler2D lastColorMap;
+// layout(binding = 1) uniform sampler2D nextColorMap;
+
+// layout(binding = 2) uniform sampler2D previousFlow;
+
+
+// layout(binding = 0, rg32f) uniform image2D lastGradientMap;
+// //layout(binding = 1, rgba32f) uniform image2D flowMap;
+// layout(binding = 1, rgba32f) uniform image2D sparseFlowMap;
+
+// //layout(binding = 3, rgba32f) uniform image2D testMap;
+
+// //layout(binding = 3, rgba32f) uniform image2D flowToWipe;
+// layout(binding = 2, rgba32f) uniform image2D previousFrameFlow;
+
+// uniform int level;
+// uniform vec2 invImageSize;
+// uniform vec2 invPreviousImageSize;
+
+// float INF = 1e10f;
+// float EPS = 0.001f;
+
+// 	int patch_size = 8;
+
+
+// float luminance(vec3 rgb)
+// {
+//     return (0.299f * float(rgb.x) + 0.587f * float(rgb.y) + 0.114f * float(rgb.z));
+// }
+
+// vec2 solve(float A[2][2], float b[2]) {
+// 	const int n = 2;
+// 	float L[n][n];
+//     float d[n];
+//     float v[n];
+//     float s[n];
+
+// 	vec2 result;
+
+//     for (int i = 0; i < n; i++) {
+//         v[i] = 0.0f;
+//         d[i] = 0.0f;
+//         for (int j = 0; j < n; j++) {
+//             L[i][j] = 0.0f;
+//         }
+//     }
+
+
+//     for (int i = 0; i < n; i++) {
+//         for (int j = 0; j <= i; j++) {
+//             float tempSum = 0.0f;
+//             for (int k = 0; k < j; k++) {
+//                 tempSum += L[i][k] * L[j][k];
+//             }
+
+//             if (i == j) {
+//                 L[i][j] = sqrt(A[i][i] - tempSum);
+//             }
+//             else {
+//                 L[i][j] = (1.0f / L[j][j] * (A[i][j] - tempSum));
+//             }
+//         }
+//     }
+
+// 	    // forward subs
+//     float z[n];
+
+//     z[0] = (b[0])                        / L[0][0];
+//     z[1] = (b[1] - (L[1][0] * z[0]))     / L[1][1];
+
+//     // backward subs
+//     float x[n];
+
+//     x[1] = (z[1])                       / L[1][1];
+//     x[0] = (z[0] - (L[0][1] * z[1]))    / L[0][0];
+
+//     if (isnan(x[0]) || isnan(x[1])) {
+// 		return vec2(0.0f);
+//     }
+
+//     result.x = result.x - x[0];
+// 	result.y = result.y - x[1];
+
+// 	return result;
+
+// }
+
+// void getPatchSecondImage() {
+	
+// }
+
+// shared float x_data[20][20];
+// shared float y_data_patch[20][20];
+
+
+// shared float x_grad_data[20][20];
+// shared float y_grad_data[20][20];
+
+// void makePatches(out vec3 xxyyxy, out vec2 xy)
+// {
+//     // pix_sparse is the pixel location for this current layer's sparse image === gl_WorkGroupID.x * 4 + pos.x
+//     ivec2 pix_sparse = ivec2(gl_GlobalInvocationID.xy);
+//     ivec2 pos = ivec2(gl_LocalInvocationID.xy); // ( 0:3 , 0:3 )
+//     ivec2 imSize_D = ivec2(imageSize(lastGradientMap).xy);
+
+//     for (int i = 0; i < 5; i++)
+//     {
+//         for (int j = 0; j < 5; j++)
+//         {
+//             vec2 tempVal = imageLoad(lastGradientMap, ivec2(pix_sparse.x * 4 + i + pos.x, pix_sparse.y * 4 + j + pos.y)).xy;
+//             x_data[pos.x * 5 + i][pos.y * 5 + j] = tempVal.x;
+//             y_data_patch[pos.x * 5 + i][pos.y * 5 + j] = tempVal.y;
+//         }
+//     }
+
+
+//     float sum_xx_data = 0.0f;
+//     float sum_yy_data = 0.0f;
+//     float sum_xy_data = 0.0f;
+//     float sum_x_data = 0.0f;
+//     float sum_y_data = 0.0f;
+
+
+//     barrier();
+
+//     int xOffset = int(pos.x * patch_size / 2);
+//     int yOffset = int(pos.y * patch_size / 2);
+
+//     for (int i = xOffset; i < xOffset + patch_size; ++i)
+//     {
+//         for (int j = yOffset; j < yOffset + patch_size; ++j)
+//         {
+//             sum_xx_data += x_data[i][j] * x_data[i][j];
+//             sum_yy_data += y_data_patch[i][j] * y_data_patch[i][j];
+//             sum_xy_data += x_data[i][j] * y_data_patch[i][j];
+//             sum_x_data += x_data[i][j];
+//             sum_y_data += y_data_patch[i][j];
+
+//         }
+//     }
+
+//     barrier();
+
+// 	xxyyxy = vec3(sum_xx_data, sum_yy_data, sum_xy_data);
+// 	xy = vec2(sum_x_data, sum_y_data);
+
+// }
+
+// float computeSSDMeanNorm(float[8][8] yData)
+// {
+
+//     float sum_square_diff = 0.0f;
+//     float sum_diff = 0.0f;
+
+//     // process (4x4) 16 patches per workgroup, 1 per invocation
+
+//     int xOffset = int(gl_LocalInvocationID.x) * patch_size / 2;
+//     int yOffset = int(gl_LocalInvocationID.y) * patch_size / 2;
+
+//     // loops offest by 4 (0-8, 4-12, 8-16, 12-20)
+//     for (int i = xOffset; i < xOffset + patch_size; ++i)
+//     {
+//         for (int j = yOffset; j < yOffset + patch_size; ++j)
+//         {
+//             float diff = yData[i - xOffset][j - yOffset] - x_data[i][j];
+//             sum_diff += diff;
+//             sum_square_diff += diff * diff;
+//         }
+//     }
+
+//     float SSDMN = sum_square_diff - sum_diff * sum_diff / float(patch_size * patch_size);
+
+//     //if (SSDMN > )
+
+//     return SSDMN;
+
+// }
+
+// // if there SSD > thresh && block contains boundary then we need to redo this for each region
+// float processPatchMeanNorm(inout float dst_dUx, inout float dst_dUy, float x_grad_sum, float y_grad_sum, float[8][8] ydata)
+// {
+//     float n = float(patch_size * patch_size);
+//     float sum_square_diff = 0.0f;
+//     float sum_diff = 0.0f;
+//     float diff;
+
+//     float sum_I0x_mul = 0.0f;
+//     float sum_I0y_mul = 0.0f;
+
+//     // here we need to process the gradient full size images
+//     int xOffset = int(gl_LocalInvocationID.x) * patch_size / 2;
+//     int yOffset = int(gl_LocalInvocationID.y) * patch_size / 2;
+
+//     for (int i = xOffset; i < xOffset + patch_size; ++i)
+//     {
+//         for (int j = yOffset; j < yOffset + patch_size; ++j)
+//         {
+//             diff = ydata[i - xOffset][j - yOffset] - x_data[i][j];
+//             sum_diff += diff;
+//             sum_square_diff += diff * diff;
+
+//             sum_I0x_mul += diff * x_grad_data[i][j];
+//             sum_I0y_mul += diff * y_grad_data[i][j];
+
+//         }
+//     }
+
+//     dst_dUx = sum_I0x_mul - sum_diff * x_grad_sum / n;
+//     dst_dUy = sum_I0y_mul - sum_diff * y_grad_sum / n;
+//     return sum_square_diff - sum_diff * sum_diff / n;
+// }
+
+
+
+// void main()
+// {
+//     ivec2 pixSparse = ivec2(gl_GlobalInvocationID.xy);
+	
+// 	//ivec2 imSize = ivec2(imageSize(sparseFlowMap));
+// 	//if (pixSparse.x >= imSize.x || pixSparse.y >= imSize.y) {
+// 	//	return;
+// 	//}
+// 	vec2 denseTexSize = vec2(textureSize(lastColorMap, level).xy);
+
+// 	ivec2 pix = (pixSparse * ivec2(4, 4));
+// 	vec2 pixCenter = vec2(pix);
+
+//     vec2 base = (round(vec2(pix)) - (0.5f * 8.0f - 0.5f));
+
+// 	//float lastImageData[8][8];
+// 	//float nextImageData[8][8];
+
+// 	float y_data[8][8];
+//     float y_data_init[8][8];
+
+// 	vec2 gradData[8][8];
+
+// 	float templateSum = 0.0f;
+// 	vec2 gradSum = vec2(0.0f);
+
+
+// 	mat2 H = mat2(0.0f);
+
+// 	ivec2 pix_sparse = ivec2(gl_GlobalInvocationID.xy);
+//     ivec2 pos = ivec2(gl_LocalInvocationID.xy); // (0:3, 0:3)
+//     vec2 imSize = vec2(imageSize(lastGradientMap).xy); // dense size
+
+
+// 	float min_SSD;
+//     float cur_SSD;
+
+// 	int imageType = 1; // color or grey
+
+//     int psz2 = patch_size / 2;
+
+// 	    vec2 prevFlowXY = vec2(0);
+
+//         for (int i = 0; i< 5; i++)
+//         {
+//             for (int j = 0; j< 5; j++)
+//             {
+//                 float xCoord_I0 = ( (float(gl_GlobalInvocationID.x) * 4.0f + float(pos.x) + float(i))) / ( float(imSize.x));
+//                 float yCoord_I0 = ( (float(gl_GlobalInvocationID.y) * 4.0f + float(pos.y) + float(j))) / ( float(imSize.y));
+//                 if (imageType == 0)
+//                 {
+//                       x_data[pos.x * 5 + i][pos.y * 5 + j] = textureLod(lastColorMap, vec2(xCoord_I0, yCoord_I0), level).x;
+//                 }
+//                 else if (imageType == 1)
+//                 {
+//                       x_data[pos.x * 5 + i][pos.y * 5 + j] = luminance(textureLod(lastColorMap, vec2(xCoord_I0, yCoord_I0), level).xyz);
+//                 }
+
+//             }
+//         }
+      
+//     float xCoord_sparse = ( float(pix_sparse.x)) / ( float(imSize.x / 4));
+//     float yCoord_sparse = ( float(pix_sparse.y)) / ( float(imSize.y / 4));
+
+// 	vec3 inputProd;
+//     vec2 inputSum;
+
+// 	makePatches(inputProd, inputSum);
+
+// 	for (int i = 0; i < 5; i++)
+//     {
+//         for (int j = 0; j < 5; j++)
+//         {
+//             vec2 tempVal = imageLoad(lastGradientMap, ivec2(gl_GlobalInvocationID.x * 4 + i + pos.x, gl_GlobalInvocationID.y * 4 + j + pos.y)).xy;
+//             x_grad_data[pos.x * 5 + i][pos.y * 5 + j] = tempVal.x;
+//             y_grad_data[pos.x * 5 + i][pos.y * 5 + j] = tempVal.y;
+//         }
+//     }
+
+
+//     vec2 initFlowXY = vec2(0);
+
+// float xCoord = (( (float(gl_GlobalInvocationID.x) * 4.0 + float(psz2))) / ( float(imSize.x))) ;
+// float yCoord = (( (float(gl_GlobalInvocationID.y) * 4.0 + float(psz2))) / ( float(imSize.y))) ;
+
+
+
+
+//    initFlowXY = imageLoad(previousFrameFlow, ivec2(gl_GlobalInvocationID.x* 4 + psz2, gl_GlobalInvocationID.y* 4 + psz2)).xy; // get the flow from the centre of the patch
+
+
+
+//     initFlowXY.x /= float(pow(2, level+1)); 
+//     initFlowXY.y /= float(pow(2, level+1)); 
+
+
+
+//     float xCoord_init;
+//     float yCoord_init;
+
+//     for (int i = 0; i < patch_size; i++)
+//     {
+//         for (int j = 0; j < patch_size; j++)
+//         {
+//             xCoord_init = (( (float(gl_GlobalInvocationID.x) * 4.0 + initFlowXY.x + float(i))) / (float(imSize.x)));
+//             yCoord_init = (( (float(gl_GlobalInvocationID.y) * 4.0 + initFlowXY.y + float(j))) / (float(imSize.y)));
+//         //    y_data_init[i][j] = luminance(textureLod(tex_I1, vec2((float(gl_GlobalInvocationID.x) * 4.0f + initFlowXY.x + float(i)) / float(imSize.x), (float(gl_GlobalInvocationID.y) * 4.0f + initFlowXY.y + float(j)) / float(imSize.y)), level).xyz);
+//                 if (imageType == 0)
+//                 {
+//                     y_data_init[i][j] = textureLod(nextColorMap, vec2(xCoord_init, yCoord_init), level).x;
+//                 }
+//                 else if (imageType == 1)
+//                 {
+//                     y_data_init[i][j] = luminance(textureLod(nextColorMap, vec2(xCoord_init, yCoord_init), level).xyz);
+//                 }
+    
+//         }
+//     }
+
+
+//     barrier();
+
+//     cur_SSD = computeSSDMeanNorm(y_data_init);
+
+//     barrier();
+
+// //
+// // LOOPING STARTS HERE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+// // 
+//     for (int iter_outer = 0; iter_outer< level + 4; iter_outer++) // the more iterations the slower it becomes, obviously
+//     {
+//         if (iter_outer == 0)
+//         {
+//             // reading from the previous layer enables linear inter for free
+//             prevFlowXY = 2.0 * textureLod(previousFlow, vec2(xCoord, yCoord), level + 1).xy;
+
+//             //imageStore(test_texture, ivec2((gl_GlobalInvocationID.x* 4 + psz2), (gl_GlobalInvocationID.y* 4 + psz2)), vec4((initFlowXY.x - prevFlowXY.x)));
+//         }
+//         else
+//         {
+//             // prevFlowXY = vec2(0);
+//             prevFlowXY = imageLoad(sparseFlowMap, pix_sparse).xy;
+//         }
+
+//         barrier();
+
+//         for (int i = 0; i < patch_size; i++)
+//         {
+//             for (int j = 0; j < patch_size; j++)
+//             {
+//                 float xCoord_prev = (( (float(gl_GlobalInvocationID.x) * 4.0 + prevFlowXY.x + float(i))) / ( float(imSize.x)));
+//                 float yCoord_prev = (( (float(gl_GlobalInvocationID.y) * 4.0 + prevFlowXY.y + float(j))) / ( float(imSize.y)));
+//                 if (imageType == 0)
+//                 {
+//                     y_data[i][j] = textureLod(nextColorMap, vec2(xCoord_prev, yCoord_prev), level).x;
+//                 }
+//                 else if (imageType == 1)
+//                 {
+//                     y_data[i][j] = luminance(textureLod(nextColorMap, vec2(xCoord_prev, yCoord_prev), level).xyz);
+//                 }
+//             }
+//         }
+
+//         barrier();
+
+//         min_SSD = computeSSDMeanNorm(y_data);
+
+//         barrier();
+
+//         float Ux = 0.0f;
+//         float Uy = 0.0f;
+
+//         if (cur_SSD <= min_SSD)
+//         {
+//             min_SSD = cur_SSD;
+//             Ux = initFlowXY.x;
+//             Uy = initFlowXY.y;
+//         }
+//         else if (min_SSD < cur_SSD)
+//         {
+//             Ux = prevFlowXY.x;
+//             Uy = prevFlowXY.y;
+//         }
+
+
+// //        float dir = -1.0f;
+
+// //        if (iter_outer % 2 != 0)
+// //        {
+// //            dir = 1.0f;
+// //        }
+
+// //        for (int i = 0; i<patch_size; i++)
+// //        {
+// //            for (int j = 0; j<patch_size; j++)
+// //            {
+// //                float xCoord_dir0 = (((float(gl_GlobalInvocationID.x) * 4.0 + dir + Ux + float(i))) / (float(imSize.x)));
+// //                float yCoord_dir0 = (((float(gl_GlobalInvocationID.y) * 4.0 + Uy + float(j))) / (float(imSize.y)));
+
+// //                if (imageType == 0)
+// //                {
+// //                    y_data[i][j] = textureLod(tex_I1, vec2(xCoord_dir0, yCoord_dir0), level).x;
+// //                }
+// //                else if (imageType == 1)
+// //                {
+// //                    y_data[i][j] = luminance(textureLod(tex_I1, vec2(xCoord_dir0, yCoord_dir0), level).xyz);
+// //                }
+
+// //            }
+// //        }
+
+// //        barrier();
+
+// //float spatial_x_SSD = computeSSDMeanNorm(y_data);
+
+// //barrier();
+
+// //        if (spatial_x_SSD<min_SSD)
+// //        {
+// //            min_SSD = spatial_x_SSD;
+// //            Ux = Ux + dir;
+// //        }
+        
+// //        barrier();
+
+// //for (int i = 0; i<patch_size; i++)
+// //{
+// //    for (int j = 0; j<patch_size; j++)
+// //    {
+// //            float xCoord_dir1 = (((float(gl_GlobalInvocationID.x) * 4.0 + Ux + float(i))) / (float(imSize.x)));
+// //            float yCoord_dir1 = (((float(gl_GlobalInvocationID.y) * 4.0 + dir + Uy + float(j))) / (float(imSize.y)));
+
+// //        if (imageType == 0)
+// //        {
+// //            y_data[i][j] = textureLod(tex_I1, vec2(xCoord_dir1, yCoord_dir1), level).x;
+// //        }
+// //        else if (imageType == 1)
+// //        {
+// //            y_data[i][j] = luminance(textureLod(tex_I1, vec2(xCoord_dir1, yCoord_dir1), level).xyz);
+// //        }
+// //    }
+// //}
+
+// //barrier();
+
+// //float spatial_y_SSD = computeSSDMeanNorm(y_data);
+
+// //barrier();
+
+// //if (spatial_y_SSD<min_SSD)
+// //{
+// //     Uy = Uy + dir;
+// //}
+
+
+// //imageStore(im_S_x_y, pix_sparse, vec4(Ux, Uy, 0, 0));
+
+// float cur_Ux = Ux;
+//         float cur_Uy = Uy;
+
+
+
+
+
+// float detH = inputProd.x * inputProd.y - inputProd.z * inputProd.z;
+
+
+//         if (abs(detH) < EPS) // some EPS constant
+//         {
+//                 detH = EPS;
+//         }
+
+//         float invH11 = inputProd.y / detH;
+//         float invH12 = -inputProd.z / detH;
+//         float invH22 = inputProd.x / detH;
+//         float prev_SSD = INF; // some large number
+//         float SSD;
+//         float dx, dy;
+//         float dUx, dUy;
+
+//         float x_grad_sum = inputSum.x;
+//         float y_grad_sum = inputSum.y;
+
+// //imageStore(test_texture, pix_sparse, vec4(min_SSD));
+
+
+//         for (int t = 0; t < level + 8; t++) // CHANE+GE ME TO ITER!!!
+//         {
+//             barrier();
+
+//             for (int i = 0; i < patch_size; i++)
+//             {
+//                 for (int j = 0; j < patch_size; j++)
+//                 {
+//                     float xCoord_inner = ( (float(gl_GlobalInvocationID.x) * 4.0 + cur_Ux + float(i))) / ( float(imSize.x));
+//                     float yCoord_inner = ( (float(gl_GlobalInvocationID.y) * 4.0 + cur_Uy + float(j))) / ( float(imSize.y));
+
+//                 if (imageType == 0)
+//                 {
+//                     y_data[i][j] = textureLod(nextColorMap, vec2(xCoord_inner, yCoord_inner), level).x;
+//                 }
+//                 else if (imageType == 1)
+//                 {
+//                     y_data[i][j] = luminance(textureLod(nextColorMap, vec2(xCoord_inner, yCoord_inner), level).xyz);
+//                 }
+
+// //y_data[i][j] = luminance(textureLod(tex_I1, vec2((float(pix_sparse.x) * 4.0f + cur_Ux + float(i)) / float(imSize.x), (float(pix_sparse.y) * 4.0f + float(cur_Uy) + float(j)) / float(imSize.y)), level).xyz);
+
+//                 }
+//             }
+
+//             barrier();
+
+//             SSD = processPatchMeanNorm(dUx, dUy, x_grad_sum, y_grad_sum, y_data);
+
+//             dx = invH11* dUx + invH12* dUy;
+//             dy = invH12* dUx + invH22* dUy;
+
+//             cur_Ux -= dx;
+//             cur_Uy -= dy;
+
+//             /* Break when patch distance stops decreasing */
+//             if (SSD >= prev_SSD || prev_SSD < 0.01)
+//             {
+//                     break;
+//             }
+
+//             prev_SSD = SSD;
+
+//         }
+
+
+//         vec2 theVec = vec2(cur_Ux - Ux, cur_Uy - Uy);
+//         if (length(theVec) < (patch_size << (level + 1)))
+//         {
+//             imageStore(sparseFlowMap, pix_sparse, vec4(cur_Ux, cur_Uy, 0, 0)); 
+//         }
+//         else
+//         {
+//            imageStore(sparseFlowMap, pix_sparse, vec4(Ux, Uy, 0, 0));
+//         }
+//         //if (prev_SSD > 0.1)
+//         //{
+//            //imageStore(im_S_x_y, pix_sparse, vec4(cur_Ux/2.0, cur_Uy/2.0, 0, 0));
+
+//         //}
+        
+//         //imageStore(test_texture, pix_sparse, vec4(prev_SSD));
+
+//     } // loop
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// 	// for (int i = 0; i < patchSize; i++)
+// 	// {
+// 	// 	for (int j = 0; j < patchSize; j++)
+// 	// 	{
+		
+// 	// 		imageStore(flowToWipe, ivec2(pix) + ivec2(i, j), vec4(0));
+// 	// 		gradData[i][j] = -imageLoad(lastGradientMap, ivec2(base) + ivec2(i, j)).xy;
+		
+// 	// 		H[0][0] += gradData[i][j].x * gradData[i][j].x;
+// 	// 		H[1][1] += gradData[i][j].y * gradData[i][j].y;
+// 	// 		H[0][1] += gradData[i][j].x * gradData[i][j].y;
+
+// 	// 		lastImageData[i][j] = luminance(textureLod(lastColorMap, (vec2(base + vec2(i, j))) * invImageSize, level).xyz);
+
+// 	// 		templateSum += lastImageData[i][j];
+// 	// 		gradSum += gradData[i][j].xy;
+// 	// 	}
+// 	// }
+
+
+// 	// H[1][0] = H[0][1];
+
+// 	// if (determinant(H) < 1e-6) 
+// 	// {
+// 	// 	H[0][0] += 1e-6;
+// 	// 	H[1][1] += 1e-6;
+// 	// }
+	
+// 	// mat2 H_inv = inverse(H);
+// 	// vec4 initialFlow = vec4(0.0f);
+
+
+// 	// if (level == 4)
+// 	// {
+// 	// 	initialFlow = imageLoad(lastFlowMap, pix);
+// 	// 	initialFlow.xy *= (denseTexSize); // previously found flow scaled to this levels width/height
+
+// 	// }
+// 	// else
+// 	// {
+// 	// 	initialFlow = imageLoad(flowMap, ivec2(pix / 2));
+
+// 	// 	if (!isnan(initialFlow.z) || initialFlow.z != 0 || !isinf(initialFlow.z))
+// 	// 	{
+// 	// 		initialFlow.xy /= initialFlow.z; // weighted flow in range 0 - 1 for tex size
+// 	// 	}
+// 	// 	if (any(isnan(initialFlow.xy)))
+// 	// 	{
+// 	// 		initialFlow.xyz = vec3(0);
+// 	// 	}
+
+// 	// 	initialFlow.xy *= (denseTexSize); // previously found flow scaled to this levels width/height
+
+
+// 	// }
+
+// 	// // //
+// 	// 	//		initialFlow.xy = vec2(0);
+
+// 	// vec2 flow = initialFlow.xy;
+
+// 	// //		imageStore(testMap, pixSparse, vec4(initialFlow.xyz, 1));
+
+
+// 	// //if (flow.x > 1)
+// 	// //{
+// 	// //	flow = vec2(0.0f);
+// 	// //}
+
+
+// 	// float meanDiff, firstMeanDiff;
+// 	// //for (int iter = 0; iter < level + 4; iter++)
+
+// 	// for (int iter = 0; iter < 4; iter++)
+// 	// {
+// 	// 	vec2 du = vec2(0.0f);
+// 	// 	float warpedSum = 0.0f;
+// 	// 	vec2 flowNorm = flow * invImageSize;
+
+// 	// 	for (int i = 0; i < patchSize; i++)
+// 	// 	{
+// 	// 		for (int j = 0; j < patchSize; j++)
+// 	// 		{
+// 	// 			vec2 tc = base + vec2(i, j); 
+// 	// 			float warped = luminance(textureLod(nextColorMap, vec2(tc  * invImageSize) + flowNorm, level).xyz);
+// 	// 			du += gradData[i][j] * (warped - lastImageData[i][j]);
+// 	// 			warpedSum += warped;
+// 	// 		}
+// 	// 	}
+
+
+
+// 	// 	meanDiff = (warpedSum - templateSum) * (1.0f / float(patchSize * patchSize));
+
+
+// 	// 	if (iter == 0)
+// 	// 	{
+// 	// 		firstMeanDiff = meanDiff;
+// 	// 	}
+
+// 	// 	// if (iter > 0 && (meanDiff > firstMeanDiff || meanDiff < 0.01f))
+// 	// 	// {
+// 	// 	// 	break;
+// 	// 	// }
+		
+// 	// 	du -= gradSum * meanDiff;
+
+// 	// 	flow -= H_inv * du;
+
+// 	// } // loop
+
+	
+// 	// vec2 newPatchCenter = (pix + 0.5f) + patchSize * 0.5f + flow;
+
+//     // if (length(flow - initialFlow.xy) > (patchSize * 0.5f) ||
+//     //     newPatchCenter.x < -(patchSize * 0.5f) ||
+//     //     denseTexSize.x - newPatchCenter.x < -(patchSize * 0.5f) ||
+//     //     newPatchCenter.y < -(patchSize * 0.5f) ||
+//     //     denseTexSize.y - newPatchCenter.y < -(patchSize * 0.5f)) {
+//     //         flow = initialFlow.xy;
+//     //         meanDiff = firstMeanDiff;
+//     // }
+	
+
+//     // // NOTE: The mean patch diff will be for the second-to-last patch,
+//     // // not the true position of du. But hopefully, it will be very close.
+//     // flow *= invImageSize;
+
+// 	// imageStore(sparseFlowMap, pixSparse, vec4(flow, meanDiff, 1));
+// 	// //imageStore(sparseFlowMap, pixSparse, vec4(0.1,0.1,0.1, 1));
+
+//     // //out_flow = vec3(u.x, u.y, mean_diff);
+	
+// }

@@ -1,0 +1,217 @@
+#version 430
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+layout(binding = 0) uniform sampler2D secondColorMap;
+layout(binding = 1) uniform sampler2D previousFlow;
+
+layout(binding = 0, rg32f) uniform image2D lastGradientMap;
+layout(binding = 1, rgba32f) uniform image2D sparseFlow;
+layout(binding = 2, rgba32f) uniform image2D testImage;
+
+uniform int level;
+uniform vec2 invImageSize;
+
+float luminance(vec3 rgb)
+{
+    return (0.299f * float(rgb.x) + 0.587f * float(rgb.y) + 0.114f * float(rgb.z));
+}
+
+vec2 solve(mat2 A, vec2 b) {
+	const int n = 2;
+	float L[n][n];
+    float d[n];
+    float v[n];
+    float s[n];
+
+	vec2 result;
+
+    for (int i = 0; i < n; i++) {
+        v[i] = 0.0f;
+        d[i] = 0.0f;
+        for (int j = 0; j < n; j++) {
+            L[i][j] = 0.0f;
+        }
+    }
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j <= i; j++) {
+            float tempSum = 0.0f;
+            for (int k = 0; k < j; k++) {
+                tempSum += L[i][k] * L[j][k];
+            }
+
+            if (i == j) {
+                L[i][j] = sqrt(A[i][i] - tempSum);
+            }
+            else {
+                L[i][j] = (1.0f / L[j][j] * (A[i][j] - tempSum));
+            }
+        }
+    }
+
+	// forward subs
+    float z[n];
+
+    z[0] = (b[0])                        / L[0][0];
+    z[1] = (b[1] - (L[1][0] * z[0]))     / L[1][1];
+
+    // backward subs
+    float x[n];
+
+    x[1] = (z[1])                       / L[1][1];
+    x[0] = (z[0] - (L[0][1] * z[1]))    / L[0][0];
+
+    if (isnan(x[0]) || isnan(x[1])) {
+		return vec2(0.0f);
+    }
+
+    result.x = x[0];
+	result.y = x[1];
+
+	return result;
+
+}
+
+void computeHessian(vec2 patchGrad[8][8], out mat2 H) {
+
+    int lb = -8 / 2;
+    int ub = 8 / 2 - 1;
+
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            H[0][0] += patchGrad[i][j].x * patchGrad[i][j].x;
+			H[1][1] += patchGrad[i][j].y * patchGrad[i][j].y;
+			H[0][1] += patchGrad[i][j].x * patchGrad[i][j].y;
+        }
+    }
+
+    H[1][0] = H[0][1];
+
+	if (determinant(H) < 1e-6) 
+	{
+		H[0][0] += 1e-6;
+		H[1][1] += 1e-6;
+	}
+
+}
+
+void getPatchGrad(vec2 patchPos, out vec2 patchGrad[8][8]) {
+    int lb = -8 / 2;
+    int ub = 8 / 2 - 1;
+
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            patchGrad[i][j] = imageLoad(lastGradientMap, ivec2(patchPos + vec2(i + lb, j + lb))).xy;
+        }
+    }
+}
+
+void getPatchSecondImage(vec2 patchSecondPos, out float patchSecondImage[8][8]) {
+    float A = 0.0f;
+
+    int lb = -8 / 2;
+    int ub = 8 / 2 - 1;
+
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            patchSecondImage[i][j] = luminance(textureLod(secondColorMap, vec2((patchSecondPos + vec2(i + lb, j + lb))  * invImageSize), level).xyz);
+            A += patchSecondImage[i][j];
+        }
+    }
+
+    float normVal = (A / 64.0f);
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            patchSecondImage[i][j] -= normVal;
+            imageStore(testImage, ivec2(gl_GlobalInvocationID.xy * 4) + ivec2(i, j), vec4(patchSecondImage[i][j], 0, 0, 0));
+
+        }
+    }
+
+}
+
+vec2 getDeltaU(vec2 patchGrad[8][8], float patchSecondImage[8][8]) {
+    vec2 dU = vec2(0.0f);
+
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < 8; j++) {
+            dU += patchGrad[i][j] * patchSecondImage[i][j];
+        }
+    }
+    return dU;
+}
+
+void inverseImageStart(vec2 patchInputPos, float patchSecondImage[8][8]) {
+    getPatchSecondImage(patchInputPos, patchSecondImage);
+}
+
+void main() {
+
+    // dense patch location for this level
+    vec2 patchInputPos = vec2(gl_GlobalInvocationID.xy) * 4.0f; // 4.0f with a 50% patch overlap
+    vec2 U = vec2(0.0f);
+    vec2 patchSize = vec2(8.0f);
+    vec2 patchSecondPos;
+    vec2 patchSecondStartingPos = patchInputPos;
+
+    vec2 imSize = imageSize(lastGradientMap);
+
+    if (patchInputPos.x > imSize.x - 4 || patchInputPos.y > imSize.y - 4 ||
+        patchInputPos.x < 4 || patchInputPos.y < 4) {
+            return;
+        }
+
+    vec2 patchGrad[8][8];
+    float patchSecondImage[8][8];
+    mat2 H = mat2(0.0f);
+
+    int iter = 0;
+
+
+    if (level < 4) {
+        //U = vec2(imageLoad(previousFlow, ivec2(patchInputPos.x / 2.0, patchInputPos.y / 2.0f)).xy * 2.0f);
+        U = vec2(2.0f * textureLod(previousFlow, vec2((patchInputPos + 4.0f) * invImageSize), level + 1).xy);
+    }
+
+    getPatchGrad(patchInputPos, patchGrad);
+
+    computeHessian(patchGrad, H);
+
+    mat2 invH = inverse(H);
+
+    // inserse search start
+    inverseImageStart(vec2(patchInputPos + U), patchSecondImage);
+
+    // while not converged
+    while (iter < 10) {
+        // calc deltaU using sum(grad * patch_second)
+        vec2 deltaU = getDeltaU(patchGrad, patchSecondImage);
+        // solve in place for deltaU and the hessian for this patch
+        //vec2 result = solve(H, deltaU);
+
+        U -= invH * deltaU;
+
+        //U = U - result;
+
+        patchSecondPos = patchInputPos + U;
+
+        // check if moved too far
+        // if move is not valid, reset U, stop iterating // FIXME
+        if (length(patchSecondStartingPos - patchSecondPos) > 4.0f) {
+            U = vec2(0);
+            break;
+        }
+
+        iter++;
+
+        getPatchSecondImage(patchSecondPos, patchSecondImage);
+
+    }
+
+    //imageStore(sparseFlow, ivec2(gl_GlobalInvocationID.xy), vec4(0.6, 0.3, 0.2, 1.0));
+    imageStore(sparseFlow, ivec2(gl_GlobalInvocationID.xy), vec4(U, 0, 0));
+
+
+
+}
