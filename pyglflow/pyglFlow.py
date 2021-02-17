@@ -10,7 +10,7 @@ import imgui
 from imgui.integrations.glfw import GlfwRenderer
 from pathlib import Path
 
-import denseInverseSearch as DIS
+#import denseInverseSearch as DIS
 
 import json
 import trt_pose.coco
@@ -123,7 +123,7 @@ def do_densify(densifyShader, textureList, level, width, height):
 
     lcID = glGetUniformLocation(densifyShader, "tex_I0")
     glUniform1i(lcID, 0)
-    ncID = glGetUniformLocation(densifyShader, "tex_I1")25a6013
+    ncID = glGetUniformLocation(densifyShader, "tex_I1")
     glUniform1i(ncID, 1)
 
     glActiveTexture(GL_TEXTURE0)
@@ -283,7 +283,7 @@ def generateTextures(textureList, numImages, width, height):
     #blankFlowMap
     textureList[7] = createTexture(textureList[7], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
-    blankData = np.zeros(width*height* 4, dtype='float32')
+    blankData = np.zeros(int(width*height* 4), dtype='float32')
 
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, textureList[7])
@@ -515,7 +515,7 @@ def main():
 
 
                 textureList = generateTextures(textureList, numberOfImages, width, height)
-                densifiactionFBO = DIS.generateDensificationFramebuffer(textureList[5], width, height)
+                #densifiactionFBO = DIS.generateDensificationFramebuffer(textureList[5], width, height)
 
                 
                 resetVideoSource = False
@@ -553,7 +553,7 @@ def main():
                     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
 
                 if (firstFrame):
-                    glCopyImageSubData(textureList[1], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[0], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1)
+                    glCopyImageSubData(textureList[1], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[0], GL_TEXTURE_2D, 0, 0, 0, 0, int(width), int(height), 1)
                     glBindTexture(GL_TEXTURE_2D, textureList[0])
                     glGenerateMipmap(GL_TEXTURE_2D)
                     firstFrame = False
@@ -639,7 +639,7 @@ def main():
 
                 # swap frame handles
 
-                glCopyImageSubData(textureList[5], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[4], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1)
+                glCopyImageSubData(textureList[5], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[4], GL_TEXTURE_2D, 0, 0, 0, 0, int(width), int(height), 1)
                 glBindTexture(GL_TEXTURE_2D, textureList[4])
                 glGenerateMipmap(GL_TEXTURE_2D)
 
