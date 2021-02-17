@@ -6,12 +6,13 @@ layout(binding = 0, rgba32f) uniform image2D sparseFlowMap;
 
 uniform int level;
 uniform vec2 invDenseTexSize;
-uniform ivec2 sparseTexSize;
 
 // using point sprites, we are going to splat at patch centers into the framebuffer which is set to blend whatever is already in the framebuffer
 void main()
 {
 	int idx = gl_VertexID;
+
+	ivec2 sparseTexSize = ivec2(imageSize(sparseFlowMap).xy);
 
 	ivec2 sparseCoord = ivec2(
 		idx % sparseTexSize.x,

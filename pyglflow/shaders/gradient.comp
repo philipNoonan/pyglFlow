@@ -33,9 +33,9 @@
         | hg 0 -hg |
         | lw 0 -lw |
         dy
-        | -lw -hg -lw |
-        |  0   0   0  |
         |  lw  hg  lw |
+        |  0   0   0  |
+        | -lw -hg -lw |
 
         */
 
@@ -50,11 +50,11 @@
         float a12 = luminance(texelFetch(colorTex, ivec2(pix.x    , pix.y + 1), level).xyz);
         float a22 = luminance(texelFetch(colorTex, ivec2(pix.x + 1, pix.y + 1), level).xyz);
 
-        float sx = (lesser * a00 + upper * a01 + lesser * a02)
-                -(lesser * a20 + upper * a21 + lesser * a22);
+        float sx = -(lesser * a00 + upper * a01 + lesser * a02)
+                +(lesser * a20 + upper * a21 + lesser * a22);
 
-        float sy = (lesser * a00 + upper * a10 + lesser * a20)
-                -(lesser * a02 + upper * a12 + lesser * a22);
+        float sy = -(lesser * a00 + upper * a10 + lesser * a20)
+                +(lesser * a02 + upper * a12 + lesser * a22);
 
         imageStore(outputImage, ivec2(gl_GlobalInvocationID.xy), vec4(sx * normVal, sy * normVal, 0, 0));
 

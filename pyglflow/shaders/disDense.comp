@@ -1,0 +1,121 @@
+#version 430
+
+layout(local_size_x = 32, local_size_y = 32) in;
+
+layout(binding = 0, rgba32f) uniform image2D im_S_x_y;
+layout(binding = 1, rgba32f) uniform image2D flow_texture_x_y;
+
+layout(binding = 0) uniform sampler2D tex_I0;
+layout(binding = 1) uniform sampler2D tex_I1;
+
+
+int patch_size = 8;
+int patch_stride = 4;
+float INF = 1e10f;
+float EPS = 0.001f;
+
+uniform int imageType;
+uniform int level;
+
+float luminance(vec3 color)
+{
+    //return 0.2126 * float(color.x) / 255.0f + 0.7152 * float(color.y) / 255.0f + 0.0722 * float(color.z) / 255.0f;
+    return 0.299f * float(color.x) + 0.587f * float(color.y) + 0.114f * float(color.z);
+    //return (float(color.x) + float(color.y) + float(color.z)) / 3.0f;
+
+}
+
+void main()
+{
+    // inputs sparse flow
+    // inputs original images i0 i1
+    // outputs dense flow
+
+
+
+    vec2 imSize = vec2(imageSize(flow_texture_x_y).xy);
+
+    int x = int(gl_GlobalInvocationID.x);
+    int y = int(gl_GlobalInvocationID.y);
+    float i, j;
+
+    if (x >= imSize.x || y >= imSize.y) return;
+
+    int start_is, end_is;
+    int start_js, end_js;
+
+    end_is = min(y / patch_stride, int((imSize.y) - patch_size) / patch_stride);
+    start_is = max(0, y - patch_size + patch_stride) / patch_stride;
+    start_is = min(start_is, end_is);
+
+    end_js = min(x / patch_stride, int((imSize.x) - patch_size) / patch_stride);
+    start_js = max(0, x - patch_size + patch_stride) / patch_stride;
+    start_js = min(start_js, end_js);
+
+    float coef, sum_coef = 0.0f;
+    float sum_Ux = 0.0f;
+    float sum_Uy = 0.0f;
+
+    int i_l, i_u;
+    int j_l, j_u;
+    float i_m, j_m, diff, iMean;
+
+    i = float(y);// / float(imSize.y);
+    j = float(x);// / float(imSize.x);
+
+    /* Iterate through all the patches that overlap the current location (i,j) */
+    // but when we have patch size 8, offset 4, then each pixel will only be affected by 2 sparse pixels
+    float countSize = 0;
+    for (int is = start_is; is <= end_is; is++, countSize++)
+    {
+        for (int js = start_js; js <= end_js; js++)
+        {
+            vec2 sx_sy_val = imageLoad(im_S_x_y, ivec2(js, is)).xy;  // sx[is * ws + js];
+            //float sy_val = sy[is * ws + js];
+            //uchar2 i1_vec1, i1_vec2;
+
+            // is this the correct calculation of texture coord?
+            j_m = ((min(max(j + sx_sy_val.x, 0.0f), float(imSize.x) - 1.0f - EPS)));
+            i_m = ((min(max(i + sx_sy_val.y, 0.0f), float(imSize.y) - 1.0f - EPS)));
+
+            float warpedPixel;
+
+            if (imageType == 0)
+            {
+                float i1_val;
+                float i0_val;
+
+                i1_val = textureLod(tex_I1, vec2(j_m / float(imSize.x), i_m / float(imSize.y)), level).x;
+                i0_val = textureLod(tex_I0, vec2(j / float(imSize.x), i / float(imSize.y)), level).x;
+                diff = i1_val - i0_val;
+                warpedPixel = i1_val;
+            }
+            else if (imageType == 1)
+            {
+                vec3 i1_val;
+                vec3 i0_val;
+
+                i1_val = (textureLod(tex_I1, vec2(j_m / float(imSize.x), i_m / float(imSize.y)), level).xyz);
+                i0_val = (textureLod(tex_I0, vec2(j / float(imSize.x), i / float(imSize.y)), level).xyz);
+
+                diff = luminance(i1_val - i0_val);
+                warpedPixel = luminance(i1_val);
+
+            }
+
+            iMean += warpedPixel;
+
+            coef = 1.0 / max(1.0f, abs(diff));
+            sum_Ux += coef * sx_sy_val.x;
+            sum_Uy += coef * sx_sy_val.y;
+            sum_coef += coef;
+        }
+    }
+
+
+    imageStore(flow_texture_x_y, ivec2(x, y), vec4(sum_Ux / sum_coef, sum_Uy / sum_coef, 0, 0));
+   //imageStore(flow_texture_x_y, ivec2(x, y), vec4(iMean / countSize, 0, 0, 0));
+
+
+
+}
