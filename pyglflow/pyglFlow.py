@@ -135,6 +135,21 @@ def preprocess(image, mean, std):
 
 def main():
 
+
+    # initialize glfw
+    if not glfw.init():
+        return
+    #glfw.window_hint(glfw.VISIBLE, False)    
+    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
+    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+    #creating the window
+    window = glfw.create_window(1600, 900, "PyGLFlow", None, None)
+    if not window:
+        glfw.terminate()
+        return
+
+    glfw.make_context_current(window)
+
     with open('./models/human_pose.json', 'r') as f:
         human_pose = json.load(f)
     
@@ -181,18 +196,7 @@ def main():
 
     densifiactionFBO = -1
 
-    # initialize glfw
-    if not glfw.init():
-        return
-    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 4)
-    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
-    #creating the window
-    window = glfw.create_window(1600, 900, "PyGLFlow", None, None)
-    if not window:
-        glfw.terminate()
-        return
 
-    glfw.make_context_current(window)
 
     imgui.create_context()
     impl = GlfwRenderer(window)

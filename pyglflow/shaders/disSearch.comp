@@ -34,6 +34,7 @@ void main()
 
 	ivec2 pix = (pixSparse * ivec2(4, 4));
 	vec2 pixCenter = vec2(pix) + 0.5f;
+	vec2 base = (round(vec2(pix)) - (0.f * 8.0f - 0.5f));
 
 	float lastImageData[8][8];
 	float nextImageData[8][8];
@@ -53,13 +54,13 @@ void main()
 		{
 		
 			imageStore(flowToWipe, ivec2(pix) + ivec2(i, j), vec4(0));
-			gradData[i][j] = -imageLoad(lastGradientMap, ivec2(pix) + ivec2(i, j)).xy;
+			gradData[i][j] = -imageLoad(lastGradientMap, ivec2(base) + ivec2(i, j)).xy;
 		
 			H[0][0] += gradData[i][j].x * gradData[i][j].x;
 			H[1][1] += gradData[i][j].y * gradData[i][j].y;
 			H[0][1] += gradData[i][j].x * gradData[i][j].y;
 
-			lastImageData[i][j] = luminance(textureLod(lastColorMap, (vec2(pixCenter + vec2(i, j))) * invImageSize, level).xyz);
+			lastImageData[i][j] = luminance(textureLod(lastColorMap, (vec2(base + vec2(i, j))) * invImageSize, level).xyz);
 
 			templateSum += lastImageData[i][j];
 			gradSum += gradData[i][j].xy;
@@ -89,7 +90,7 @@ void main()
 	}
 	if (!isnan(initialFlow.z) || initialFlow.z != 0 || isinf(initialFlow.z))
 	{
-		initialFlow.xy /= initialFlow.z; // weighted flow in range 0 - 1 for tex size
+		initialFlow.xy /= initialFlow.w; // weighted flow in range 0 - 1 for tex size
 	}
 	if (any(isnan(initialFlow.xy)))
 	{
@@ -122,7 +123,7 @@ void main()
 		{
 			for (int j = 0; j < patchSize; j++)
 			{
-				vec2 tc = pixCenter + vec2(i, j); 
+				vec2 tc = base + vec2(i, j); 
 				float warped = luminance(textureLod(nextColorMap, vec2(tc  * invImageSize) + flowNorm, level).xyz);
 				du += gradData[i][j] * (warped - lastImageData[i][j]);
 				warpedSum += warped;
