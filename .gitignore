@@ -108,3 +108,4 @@ pyglFlow-venv/
 
 # Custom
 data/*
+models/*

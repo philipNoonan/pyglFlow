@@ -51,6 +51,10 @@ def do_gradFilter(gradShader, textureList, level, width, height):
 
 def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
 
+
+
+
+
     invDenseWidth =  1.0 / float(int(width) >> level)
     invDenseHeight = 1.0 / float(int(height) >> level)
 
@@ -59,18 +63,15 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
 
     glUseProgram(inverseSearchShader)
 
-    lcID = glGetUniformLocation(inverseSearchShader, "secondColorMap")
-    glUniform1i(lcID, 0)
-    #ncID = glGetUniformLocation(inverseSearchShader, "firstColorMap")
-    #glUniform1i(ncID, 1)
-    pfID = glGetUniformLocation(inverseSearchShader, "previousFlow")
-    glUniform1i(pfID, 1)
+    glUniform1i(glGetUniformLocation(inverseSearchShader, "tex_I0"), 0)
+    glUniform1i(glGetUniformLocation(inverseSearchShader, "tex_I1"), 1)
+    glUniform1i(glGetUniformLocation(inverseSearchShader, "tex_flow_previous"), 2)
 
-    lvlID = glGetUniformLocation(inverseSearchShader, "level")
-    glUniform1i(lvlID, level)
+    glUniform1i(glGetUniformLocation(inverseSearchShader, "level"), level)
+    glUniform1i(glGetUniformLocation(inverseSearchShader, "imageType"), 1)
 
-    iisID = glGetUniformLocation(inverseSearchShader, "invImageSize")
-    glUniform2f(iisID, invDenseWidth, invDenseHeight)
+    #iisID = glGetUniformLocation(inverseSearchShader, "invImageSize")
+    #glUniform2f(iisID, invDenseWidth, invDenseHeight)
 
     #ipisID = glGetUniformLocation(inverseSearchShader, "invPreviousImageSize")
     #glUniform2f(ipisID, invPrevDenseWidth, invPrevDenseHeight)
@@ -81,18 +82,15 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
     glActiveTexture(GL_TEXTURE0)
     glBindTexture(GL_TEXTURE_2D, textureList[0]) # last col
     glActiveTexture(GL_TEXTURE1)
-    glBindTexture(GL_TEXTURE_2D, textureList[5]) # flow
-    #glActiveTexture(GL_TEXTURE2)
-    #glBindTexture(GL_TEXTURE_2D, textureList[5]) # flow
+    glBindTexture(GL_TEXTURE_2D, textureList[1]) # col
+    glActiveTexture(GL_TEXTURE2)
+    glBindTexture(GL_TEXTURE_2D, textureList[5]) # last flow
 
 
-    glBindImageTexture(0, textureList[2], level, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F) # last grad
-    #glBindImageTexture(1, textureList[5], int(level + 1), GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # flow to read from
-    glBindImageTexture(1, textureList[6], level, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F) # sparse flow
+    glBindImageTexture(0, textureList[2], level, GL_FALSE, 0, GL_READ_ONLY, GL_RG32F) # grad
+    glBindImageTexture(1, textureList[4], level, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F) # flow
+    glBindImageTexture(2, textureList[6], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) # sparse
 
-
-    glBindImageTexture(2, textureList[4], level, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32F) # flow to wipe next flow (densified flow)
-    #glBindImageTexture(2, textureList[5], int(level + 1), GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # last flow
 
     sparseWidth = (int(width / 4))
     sparseHeight = (int(height / 4))
@@ -100,8 +98,8 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
     #compWidth = divup(int(width) >> level, 16)
     #compHeight = divup(int(height) >> level, 16)
 
-    compWidth = divup(int(sparseWidth) >> level, 32)
-    compHeight = divup(int(sparseHeight) >> level, 32)
+    compWidth = divup((int(width) >> level), 16)
+    compHeight = divup((int(height) >> level), 16)
 
     glDispatchCompute(compWidth, compHeight, 1)
     glMemoryBarrier(GL_ALL_BARRIER_BITS)
@@ -110,9 +108,9 @@ def do_inverseSearch(inverseSearchShader, textureList, level, width, height):
 def do_densify(densifyShader, textureList, level, width, height):
     glUseProgram(densifyShader)
 
-    lcID = glGetUniformLocation(densifyShader, "secondColorMap")
+    lcID = glGetUniformLocation(densifyShader, "tex_I0")
     glUniform1i(lcID, 0)
-    ncID = glGetUniformLocation(densifyShader, "firstColorMap")
+    ncID = glGetUniformLocation(densifyShader, "tex_I1")
     glUniform1i(ncID, 1)
 
     glActiveTexture(GL_TEXTURE0)
@@ -122,6 +120,8 @@ def do_densify(densifyShader, textureList, level, width, height):
 
     glBindImageTexture(0, textureList[6], level, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F) # sparse flow
     glBindImageTexture(1, textureList[5], level, GL_FALSE, 0, GL_READ_WRITE, GL_RGBA32F) # dense flow
+
+    glUniform1i(glGetUniformLocation(densifyShader, "imageType"), 1)
 
     lvlID = glGetUniformLocation(densifyShader, "level")
     glUniform1i(lvlID, level)
@@ -241,8 +241,8 @@ def openVideo(filename):
 
 def openCamera(camera):
     cap = cv2.VideoCapture(int(camera))
-    width = 1280
-    height = 720
+    width = 640
+    height = 480
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
 
@@ -514,15 +514,15 @@ def main():
 
 
                 if (doFilterEnabled):
-                    #glCopyImageSubData(textureList[7], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[5], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1)
-                    #glBindTexture(GL_TEXTURE_2D, textureList[5])
-                    #glGenerateMipmap(GL_TEXTURE_2D)
+
 
                     for lvl in range(4, -1, -1):
                         do_gradFilter(gradShader, textureList, lvl, width, height)
                         do_inverseSearch(inverseSearchShader, textureList, lvl, width, height)
                         do_densify(denseShader, textureList, lvl, width, height)
                         #do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
+                    
+   
 
                 w, h = glfw.get_framebuffer_size(window)
 
@@ -561,10 +561,10 @@ def main():
                 # set third draw call's drawing location (we've shifted accros by 2 * width / 3)
                 xpos = 2.0 * float(w) / 3.0
                 glViewport(int(xpos), int(ypos), int(xwidth),h)
-                glUniform1i(renderType_loc, 1)
+                glUniform1i(renderType_loc, 2)
 
                 glActiveTexture(GL_TEXTURE1)
-                glBindTexture(GL_TEXTURE_2D, textureList[4])
+                glBindTexture(GL_TEXTURE_2D, textureList[5])
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
@@ -584,6 +584,15 @@ def main():
                 # glGenerateMipmap(GL_TEXTURE_2D)
 
                 # swap frame handles
+
+                glCopyImageSubData(textureList[5], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[4], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1)
+                glBindTexture(GL_TEXTURE_2D, textureList[4])
+                glGenerateMipmap(GL_TEXTURE_2D)
+
+                # glCopyImageSubData(textureList[7], GL_TEXTURE_2D, 0, 0, 0, 0, textureList[5], GL_TEXTURE_2D, 0, 0, 0, 0, width, height, 1)
+                # glBindTexture(GL_TEXTURE_2D, textureList[5])
+                # glGenerateMipmap(GL_TEXTURE_2D) 
+
                 textureList[0], textureList[1] = textureList[1], textureList[0]
                 #textureList[2], textureList[3] = textureList[3], textureList[2]
                # textureList[4], textureList[5] = textureList[5], textureList[4]
