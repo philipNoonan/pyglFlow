@@ -48,7 +48,7 @@
 
             vec3 rgb = mix(K.xxx, clamp(p - K.xxx, 0.0f, 1.0f), mag * ((float(sliderR) + 1.0f) / 1.0f));
 
-            col = vec4((1.0f - rgb) * 1.0f, mag > 0.5f ? (mag < 0.5 ? mag / 0.5 : 1.0) : 0.0 * 0.5);
+            col = vec4((1.0f - rgb) * 0.3f, mag > 0.5f ? (mag < 0.5 ? mag / 0.5 : 1.0) : 0.0 * 0.5);
 
         }
 

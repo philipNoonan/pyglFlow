@@ -11,60 +11,6 @@ from imgui.integrations.glfw import GlfwRenderer
 from pathlib import Path
 import time
 
-# import pycuda.driver as cuda
-# import pycuda.autoinit
-# import tensorrt as trt
-
-def alloc_buf(engine):
-    # host cpu mem
-    h_in_size = trt.volume(engine.get_binding_shape(0))
-    h_out_size = trt.volume(engine.get_binding_shape(1))
-    h_in_dtype = trt.nptype(engine.get_binding_dtype(0))
-    h_out_dtype = trt.nptype(engine.get_binding_dtype(1))
-    in_cpu = cuda.pagelocked_empty(h_in_size, h_in_dtype)
-    out_cpu = cuda.pagelocked_empty(h_out_size, h_out_dtype)
-    # allocate gpu mem
-    in_gpu = cuda.mem_alloc(in_cpu.nbytes)
-    out_gpu = cuda.mem_alloc(out_cpu.nbytes)
-    stream = cuda.Stream()
-    return in_cpu, out_cpu, in_gpu, out_gpu, stream
-
-def inference(engine, context, inputs, out_cpu, in_gpu, out_gpu, stream):
-    # async version
-    # with engine.create_execution_context() as context:  # cost time to initialize
-    # cuda.memcpy_htod_async(in_gpu, inputs, stream)
-    # context.execute_async(1, [int(in_gpu), int(out_gpu)], stream.handle, None)
-    # cuda.memcpy_dtoh_async(out_cpu, out_gpu, stream)
-    # stream.synchronize()
-
-    # sync version
-    cuda.memcpy_htod(in_gpu, inputs)
-    context.execute(1, [int(in_gpu), int(out_gpu)])
-    cuda.memcpy_dtoh(out_cpu, out_gpu)
-    return out_cpu
-
-# TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
-
-# runtime = trt.Runtime(TRT_LOGGER)
-# with open('./models/engine512x320.trt', 'rb') as f:
-#     engine_bytes = f.read()
-#     engine = runtime.deserialize_cuda_engine(engine_bytes)
-
-
-
-#import denseInverseSearch as DIS
-
-import json
-import trt_pose.coco
-import torch2trt
-import torch
-from torch2trt import TRTModule
-import torchvision.transforms as transforms
-import PIL.Image
-from trt_pose.draw_objects import DrawObjects
-from trt_pose.parse_objects import ParseObjects
-
-
 def divup(a, b):
     if a % b != 0:
         return int(a / b + 1)
@@ -382,30 +328,30 @@ def main():
     # in_cpu, out_cpu, in_gpu, out_gpu, stream = alloc_buf(engine)
 
 
-    with open('./models/human_pose.json', 'r') as f:
-        human_pose = json.load(f)
+    # with open('./models/human_pose.json', 'r') as f:
+    #     human_pose = json.load(f)
     
-    topology = trt_pose.coco.coco_category_to_topology(human_pose)
+    # topology = trt_pose.coco.coco_category_to_topology(human_pose)
     
 
-    WIDTH = 256
-    HEIGHT = 256
+    # WIDTH = 256
+    # HEIGHT = 256
 
-    #data = torch.zeros((1, 3, HEIGHT, WIDTH)).cuda()
+    # #data = torch.zeros((1, 3, HEIGHT, WIDTH)).cuda()
 
-    OPTIMIZED_MODEL = Path('./models/densenet121_baseline_att_256x256_B_epoch_160_trt.pth')
+    # OPTIMIZED_MODEL = Path('./models/densenet121_baseline_att_256x256_B_epoch_160_trt.pth')
 
-    model_trt = TRTModule()
-    model_trt.load_state_dict(torch.load(OPTIMIZED_MODEL))
+    # model_trt = TRTModule()
+    # model_trt.load_state_dict(torch.load(OPTIMIZED_MODEL))
 
-    print('loaded model')
+    # print('loaded model')
 
-    mean = torch.Tensor([0.485, 0.456, 0.406]).cuda()
-    std = torch.Tensor([0.229, 0.224, 0.225]).cuda()
-    device = torch.device('cuda')
+    # mean = torch.Tensor([0.485, 0.456, 0.406]).cuda()
+    # std = torch.Tensor([0.229, 0.224, 0.225]).cuda()
+    # device = torch.device('cuda')
 
-    parse_objects = ParseObjects(topology)
-    draw_objects = DrawObjects(topology)
+    # parse_objects = ParseObjects(topology)
+    # draw_objects = DrawObjects(topology)
 
 
 
@@ -722,10 +668,10 @@ def main():
                 # set third draw call's drawing location (we've shifted accros by 2 * width / 3)
                 xpos = 2.0 * float(w) / 3.0
                 glViewport(int(xpos), int(ypos), int(xwidth),h)
-                glUniform1i(renderType_loc, 1)
+                glUniform1i(renderType_loc, 2)
 
                 glActiveTexture(GL_TEXTURE1)
-                glBindTexture(GL_TEXTURE_2D, textureDict['nextGradMap'])
+                glBindTexture(GL_TEXTURE_2D, textureDict['sparseFlowMap'])
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
