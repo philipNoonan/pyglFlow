@@ -5,6 +5,8 @@
 	
     layout (binding = 0) uniform sampler2D samplerTex;
     layout (binding = 1) uniform sampler2D samplerProcessedTex;
+    layout (binding = 2) uniform sampler2D gradientTex;
+    layout (binding = 3) uniform usampler2D poseTex;
 
 	uniform int sliderR;
 	uniform int sliderG;
@@ -50,6 +52,14 @@
 
             col = vec4((1.0f - rgb) * 0.3f, mag > 0.5f ? (mag < 0.5 ? mag / 0.5 : 1.0) : 0.0 * 0.5);
 
+        }
+        else if (renderType == 3) {
+            vec2 grad = textureLod(gradientTex, outTexCoords, float(1)).xy * 50.0f;
+            col.xyz = vec3(grad.x * grad.y) * vec3(0.2, 0.3, 1.0);
+            vec3 posePixel = textureLod(poseTex, outTexCoords, 0.0f).xyz;
+            if (posePixel.x > 0 || posePixel.y > 0 || posePixel.z > 0) {
+                col.xyz = posePixel;
+            }
         }
 
 		outColor = col;

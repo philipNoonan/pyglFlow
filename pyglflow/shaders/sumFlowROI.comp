@@ -1,0 +1,36 @@
+#version 430
+
+layout(local_size_x = 128, local_size_y = 1) in;
+
+
+
+layout(binding = 0, rgba32f) uniform image2D flow;
+
+layout(std430, binding = 0) buffer sumFlowData
+{
+    vec2 sumFlow;
+};
+
+uniform ivec2 patchCenter;
+
+shared vec2 flowData[64];
+
+void main() {
+    // sum up patch centered on the patchcentre uniform 
+
+    ivec2 imsize = ivec2(imageSize(flow));
+    ivec2 pix = ivec2(clamp(int(patchCenter.x - 63), 0, imsize.x - 1), clamp(int(patchCenter.y - 63), 0, imsize.y - 1));
+
+    for (int j = 0; j < 128; j++) {
+        flowData[gl_LocalInvocationID.x] += imageLoad(flow, ivec2(pix.x, pix.y + j)).xy;
+    }
+
+    barrier();
+
+    if (gl_LocalInvocationID == 0) {
+        sumFlow = vec2(0.0f);
+        for (int i = 0; i < 128; i++) {
+            sumFlow += flowData[i];
+        }
+    }
+}

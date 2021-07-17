@@ -10,10 +10,22 @@ import imgui
 from imgui.integrations.glfw import GlfwRenderer
 from pathlib import Path
 import time
+import graphics
+from array import array
+
+from collections import deque
+import statistics
+from scipy.ndimage.filters import uniform_filter1d
 
 # import pycuda.driver as cuda
 # import pycuda.autoinit
 # import tensorrt as trt
+
+def generateBuffers(bufferDict):
+    
+    bufferDict['sumFlow'] = graphics.createBuffer(bufferDict['sumFlow'], GL_SHADER_STORAGE_BUFFER, 8, 0)
+
+    return bufferDict
 
 def alloc_buf(engine):
     # host cpu mem
@@ -54,15 +66,17 @@ def inference(engine, context, inputs, out_cpu, in_gpu, out_gpu, stream):
 
 #import denseInverseSearch as DIS
 
-import json
-import trt_pose.coco
-import torch2trt
-import torch
-from torch2trt import TRTModule
-import torchvision.transforms as transforms
-import PIL.Image
-from trt_pose.draw_objects import DrawObjects
-from trt_pose.parse_objects import ParseObjects
+import platform
+if platform.system() == 'Linux':
+    import json
+    import trt_pose.coco
+    import torch2trt
+    import torch
+    from torch2trt import TRTModule
+    import torchvision.transforms as transforms
+    import PIL.Image
+    from trt_pose.draw_objects import DrawObjects
+    from trt_pose.parse_objects import ParseObjects
 
 
 def divup(a, b):
@@ -239,8 +253,25 @@ def do_densify(densifyShader, textureDict, level, width, height):
     # glDisable(GL_BLEND)
     # glDisable(GL_VERTEX_PROGRAM_POINT_SIZE)
 
+def do_summing(summingShader, textureDict, bufferDict, level, width, height, xpix, ypix):
+    glUseProgram(summingShader)
 
+    glBindImageTexture(0, textureDict['nextFlowMap'], level, GL_FALSE, 0, GL_READ_ONLY, GL_RGBA32F) # dense flow
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, bufferDict['sumFlow'])
+    glUniform2i(glGetUniformLocation(summingShader, "patchCenter"), int(xpix), int(ypix))
 
+    glDispatchCompute(1, 1, 1)
+    glMemoryBarrier(GL_ALL_BARRIER_BITS)
+
+    glBindBuffer(GL_SHADER_STORAGE_BUFFER, bufferDict['sumFlow'])
+
+    tempData = glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, 8)
+
+    sumsFlow = np.frombuffer(tempData, dtype=np.float32)
+
+    #print(sumsFlow)
+
+    return np.float32(sumsFlow[1])
 
 def read_texture_memory(imageTex, width, height):
 
@@ -317,6 +348,7 @@ def generateTextures(textureDict, numImages, width, height):
     textureDict['nextFlowMap'] = createTexture(textureDict['nextFlowMap'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     textureDict['sparseFlowMap'] = createTexture(textureDict['sparseFlowMap'], GL_TEXTURE_2D, GL_RGBA32F, maxLevels, int(width / 4), int(height / 4), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     textureDict['blankFlowMap'] = createTexture(textureDict['blankFlowMap'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['skeletonColor'] = createTexture(textureDict['skeletonColor'], GL_TEXTURE_2D, GL_RGB8, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
     blankData = np.zeros(int(width*height* 4), dtype='float32')
 
@@ -371,9 +403,16 @@ def main():
         glfw.terminate()
         return
 
+    xPos = 0
+    yPos = 0
+
     maxLevels = 6
 
+    flow_values = deque([0, 0])
+
     glfw.make_context_current(window)
+
+
 
     # segContext = engine.create_execution_context()
 
@@ -381,33 +420,38 @@ def main():
 
     # in_cpu, out_cpu, in_gpu, out_gpu, stream = alloc_buf(engine)
 
+    if platform.system() == 'Linux':
+        with open('./models/human_pose.json', 'r') as f:
+            human_pose = json.load(f)
+        
+            topology = trt_pose.coco.coco_category_to_topology(human_pose)
+            
 
-    with open('./models/human_pose.json', 'r') as f:
-        human_pose = json.load(f)
-    
-    topology = trt_pose.coco.coco_category_to_topology(human_pose)
-    
+            WIDTH = 256
+            HEIGHT = 256
 
-    WIDTH = 256
-    HEIGHT = 256
+            #data = torch.zeros((1, 3, HEIGHT, WIDTH)).cuda()
 
-    #data = torch.zeros((1, 3, HEIGHT, WIDTH)).cuda()
+            OPTIMIZED_MODEL = Path('./models/densenet121_baseline_att_256x256_B_epoch_160_trt.pth')
 
-    OPTIMIZED_MODEL = Path('./models/densenet121_baseline_att_256x256_B_epoch_160_trt.pth')
+            model_trt = TRTModule()
+            model_trt.load_state_dict(torch.load(OPTIMIZED_MODEL))
 
-    model_trt = TRTModule()
-    model_trt.load_state_dict(torch.load(OPTIMIZED_MODEL))
+            print('loaded model')
 
-    print('loaded model')
+            mean = torch.Tensor([0.485, 0.456, 0.406]).cuda()
+            std = torch.Tensor([0.229, 0.224, 0.225]).cuda()
+            device = torch.device('cuda')
 
-    mean = torch.Tensor([0.485, 0.456, 0.406]).cuda()
-    std = torch.Tensor([0.229, 0.224, 0.225]).cuda()
-    device = torch.device('cuda')
-
-    parse_objects = ParseObjects(topology)
-    draw_objects = DrawObjects(topology)
-
-
+            parse_objects = ParseObjects(topology)
+            draw_objects = DrawObjects(topology)
+    else:
+        import mediapipe as mp
+        mp_drawing = mp.solutions.drawing_utils
+        mp_pose = mp.solutions.pose
+        pose = mp_pose.Pose(
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5)
 
 
 
@@ -436,6 +480,12 @@ def main():
         'skeletonColor' : skeletonColor,
         'blankFlowMap' : -1
     }
+
+    bufferDict = {
+        'sumFlow' : -1
+    }
+
+    bufferDict = generateBuffers(bufferDict)
 
     densifiactionFBO = -1
 
@@ -482,6 +532,9 @@ def main():
 
     denseShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(dense_shader, GL_COMPUTE_SHADER))
 
+    sum_shader = (Path(__file__).parent / 'shaders/sumFLowROI.comp').read_text()
+
+    sumShader = OpenGL.GL.shaders.compileProgram(OpenGL.GL.shaders.compileShader(sum_shader, GL_COMPUTE_SHADER))
 
     # set up VAO and VBO for full screen quad drawing calls
     VAO = glGenVertexArrays(1)
@@ -547,7 +600,7 @@ def main():
     numberOfFrames = 1
     firstFrame = True
 
-    cv2.namedWindow('frame',cv2.WINDOW_NORMAL)
+    #cv2.namedWindow('frame',cv2.WINDOW_NORMAL)
 
     classColors = np.array([
         [0,   0,   0,],
@@ -601,6 +654,16 @@ def main():
 
         else:
             ret, frame = cap.read()
+            blank_frame = np.zeros_like(frame)
+
+            if imgui.is_mouse_clicked():
+                if not imgui.is_any_item_active():
+                    mouseX, mouseY = imgui.get_mouse_pos()
+                    w, h = glfw.get_framebuffer_size(window)
+                    xPos = ((mouseX % int(w / 3)) / (w / 3) * width)
+                    yPos = (mouseY / (h)) * height
+
+                    #print(xPos, " ", yPos)
 
             if ret:
 
@@ -646,16 +709,36 @@ def main():
                 # cv2.waitKey(1)
 
                 if getPose:
-                    imageSmall = cv2.resize(frame, (WIDTH, HEIGHT))
-                    data = preprocess(imageSmall, mean, std)
-                    cmap, paf = model_trt(data)
-                    cmap, paf = cmap.detach().cpu(), paf.detach().cpu()
-                    counts, objects, peaks = parse_objects(cmap, paf)#, cmap_threshold=0.15, link_threshold=0.15)
-                    draw_objects(frame, counts, objects, peaks)
+                    if platform.system() == 'Linux':
+                        imageSmall = cv2.resize(frame, (width, height))
+                        data = preprocess(imageSmall, mean, std)
+                        cmap, paf = model_trt(data)
+                        cmap, paf = cmap.detach().cpu(), paf.detach().cpu()
+                        counts, objects, peaks = parse_objects(cmap, paf)#, cmap_threshold=0.15, link_threshold=0.15)
+                        draw_objects(blank_frame, counts, objects, peaks)
+                    else:
+                        image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        image.flags.writeable = False
+                        results = pose.process(image)
+                        #image.flags.writeable = True
+                        #frame = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+                        mp_drawing.draw_landmarks(
+                            blank_frame, results.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+
+                        #cv2.imshow("fgr", blank_frame)
+                        #cv2.waitKey(1)
+
+                    glActiveTexture(GL_TEXTURE0)
+                    glBindTexture(GL_TEXTURE_2D, textureDict['skeletonColor']) 
+                    img_data_pose = np.array(blank_frame.data, np.uint8)
+
+                    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_RGB, GL_UNSIGNED_BYTE, img_data_pose)
+
+
                     #print(counts)
                     #cv2.imshow('fr', frame)
                     glActiveTexture(GL_TEXTURE0)
-                    glBindTexture(GL_TEXTURE_2D, textureDict['blankFlowMap']) # this will errro
+                    glBindTexture(GL_TEXTURE_2D, textureDict['blankFlowMap'])
                     img_data = np.array(frame.data, np.uint8)
                     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
 
@@ -674,6 +757,15 @@ def main():
                         do_inverseSearch(inverseSearchShader, textureDict, lvl, width, height)
                         do_densify(denseShader, textureDict, lvl, width, height)
                         #do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
+
+                        currentFlow = do_summing(sumShader, textureDict, bufferDict, lvl, width, height, xPos, yPos)
+                        
+                        flow_values.appendleft(currentFlow)
+
+                        if len(flow_values) > 1000:
+                            flow_values.pop()
+
+
                     
    
 
@@ -684,30 +776,30 @@ def main():
                 # set the active drawing viewport within the current GLFW window (i.e. we are spliiting it up in 3 cols)
                 xpos = 0
                 ypos = 0
-                xwidth = float(w) / 3.0
+                xwidth = float(w) / 2.0
                 glViewport(int(xpos), int(ypos), int(xwidth),h)
                 glClear(GL_COLOR_BUFFER_BIT)
 
                 glUseProgram(shader)
 
 
-                glUniform1i(renderType_loc, 0)
-                glUniform1i(sliderR_loc, sliderRValue)
+                # glUniform1i(renderType_loc, 0)
+                # glUniform1i(sliderR_loc, sliderRValue)
 
-                #glPolygonMode(GL_FRONT_AND_BACK, GL_LINE );
-                # DRAW THE FIRST WINDOW (live feed)
-                glActiveTexture(GL_TEXTURE0)
-                if getPose:
-                    glBindTexture(GL_TEXTURE_2D, textureDict['blankFlowMap'])
-                else:
-                    glBindTexture(GL_TEXTURE_2D, textureDict['nextColor'])
+                # #glPolygonMode(GL_FRONT_AND_BACK, GL_LINE );
+                # # DRAW THE FIRST WINDOW (live feed)
+                # glActiveTexture(GL_TEXTURE0)
+                # if getPose:
+                #     glBindTexture(GL_TEXTURE_2D, textureDict['blankFlowMap'])
+                # else:
+                #     glBindTexture(GL_TEXTURE_2D, textureDict['nextColor'])
 
-                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
+                # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
 
 
                 # set second draw call's drawing location (we've shifted accros by width / 4)
-                xpos = w / 3.0                
+                xpos = 0                
                 glViewport(int(xpos), int(ypos), int(xwidth),h)
                 glUniform1i(renderType_loc, 2)
 
@@ -720,12 +812,15 @@ def main():
 
 
                 # set third draw call's drawing location (we've shifted accros by 2 * width / 3)
-                xpos = 2.0 * float(w) / 3.0
+                xpos = float(w) / 2.0
                 glViewport(int(xpos), int(ypos), int(xwidth),h)
-                glUniform1i(renderType_loc, 1)
+                glUniform1i(renderType_loc, 3)
 
-                glActiveTexture(GL_TEXTURE1)
+                glActiveTexture(GL_TEXTURE2)
                 glBindTexture(GL_TEXTURE_2D, textureDict['nextGradMap'])
+
+                glActiveTexture(GL_TEXTURE3)
+                glBindTexture(GL_TEXTURE_2D, textureDict['skeletonColor'])
 
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
@@ -761,6 +856,8 @@ def main():
                 glActiveTexture(GL_TEXTURE1)
                 glBindTexture(GL_TEXTURE_2D, textureDict['lastFlowMap'])
                 glGenerateMipmap(GL_TEXTURE_2D)
+
+
 
 
 
@@ -811,6 +908,14 @@ def main():
         if changedG:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frameCounter)
 
+        imgui.end()
+
+        meanFlow = np.mean(np.array(flow_values))
+        stdDevFlow = np.std(np.array(flow_values))
+        smooth_flow_values = uniform_filter1d(flow_values, 30)
+
+        imgui.begin("plotting")
+        imgui.plot_lines("flow", array('f', smooth_flow_values), 1000, 0, None, meanFlow - (1.5 * stdDevFlow), meanFlow + (1.5 * stdDevFlow), (500, 100))
         imgui.end()
 
         imgui.render()
