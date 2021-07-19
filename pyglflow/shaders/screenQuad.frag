@@ -93,7 +93,7 @@ vec3 plasma(float t) {
 
         }
         else if (renderType == 3) {
-            vec2 grad = textureLod(gradientTex, outTexCoords, float(1)).xy * 50.0f;
+            vec2 grad = textureLod(gradientTex, outTexCoords, float(3)).xy * 50.0f;
             col.xyz = vec3(grad.x * grad.y) * vec3(0.2, 0.3, 1.0);
             vec3 posePixel = textureLod(poseTex, outTexCoords, 0.0f).xyz;
             if (posePixel.x > 0 || posePixel.y > 0 || posePixel.z > 0) {

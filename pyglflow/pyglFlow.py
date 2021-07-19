@@ -681,7 +681,7 @@ def main():
             if sourceAvailable:
                 reset()
                 if filemode == 1:
-                    if (cameraList[currentFile] == 'kinect'):
+                    if (cameraList[currentCamera] == 'kinect'):
                         from pyk4a import Config, PyK4A
                         useKinect = True
                         k4a = PyK4A(
@@ -693,6 +693,8 @@ def main():
                         )
                         k4a.start()
                         capture = k4a.get_capture()
+                        width = 1920
+                        height = 1080
                     else:
                         cap, width, height = openCamera(cameraList[currentCamera])
                 elif filemode == 2:
@@ -728,10 +730,19 @@ def main():
                 blank_frame = np.zeros_like(frame)
             else:
                 if filemode == 1:
-                    capture = k4a.capture()
+                    capture = k4a.get_capture()
+
                     if capture.color is not None:
-                        frame = capture.color
+                        frame = image = cv2.flip(cv2.cvtColor(capture.color, cv2.COLOR_RGBA2RGB ), 0)
+                        blank_frame = np.zeros_like(frame)
+
                         ret = True
+                    if capture.transformed_depth is not None:
+                            #cv2.imshow("depth", capture.transformed_depth)
+                            #cv2.waitKey(1)
+                            glActiveTexture(GL_TEXTURE0)
+                            glBindTexture(GL_TEXTURE_2D, textureDict['depthInColor'])
+                            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_RED, GL_UNSIGNED_SHORT, np.array(capture.transformed_depth))
                     else:
                         ret = False
                 elif filemode == 2:
@@ -1046,7 +1057,7 @@ def main():
 
         if frameCounter >= numberOfFrames:
             frameCounter = 0
-            if (useKinect):
+            if (useKinect and filemode == 2):
                 playback.seek(frameCounter)
 
 
