@@ -12,6 +12,7 @@ from pathlib import Path
 import time
 import graphics
 from array import array
+import platform
 
 from collections import deque
 import statistics
@@ -20,6 +21,36 @@ from scipy.ndimage.filters import uniform_filter1d
 # import pycuda.driver as cuda
 # import pycuda.autoinit
 # import tensorrt as trt
+
+def _add_dll_directory(path: Path):
+    from ctypes import c_wchar_p, windll  # type: ignore
+    from ctypes.wintypes import DWORD
+
+    AddDllDirectory = windll.kernel32.AddDllDirectory
+    AddDllDirectory.restype = DWORD
+    AddDllDirectory.argtypes = [c_wchar_p]
+    AddDllDirectory(str(path))
+
+
+def kinect():
+    if platform.system() == "Linux":
+        return
+    env_path = os.getenv("KINECT_LIBS", None)
+    if env_path:
+        candidate = Path(env_path)
+        dll = candidate / "k4a.dll"
+        if dll.exists():
+            _add_dll_directory(candidate)
+            return
+    # autodetecting
+    program_files = Path("C:\\Program Files\\")
+    for dir in sorted(program_files.glob("Azure Kinect SDK v*"), reverse=True):
+        candidate = dir / "sdk" / "windows-desktop" / "amd64" / "release" / "bin"
+        dll = candidate / "k4a.dll"
+        if dll.exists():
+            _add_dll_directory(candidate)
+            return
+
 
 def generateBuffers(bufferDict):
     
@@ -66,7 +97,6 @@ def inference(engine, context, inputs, out_cpu, in_gpu, out_gpu, stream):
 
 #import denseInverseSearch as DIS
 
-import platform
 if platform.system() == 'Linux':
     import json
     import trt_pose.coco
@@ -325,6 +355,8 @@ def openVideo(filename):
 
     return cap, width, height
 
+
+
 def openCamera(camera):
     cap = cv2.VideoCapture(int(camera))
     width = 1280
@@ -411,6 +443,11 @@ def main():
     flow_values = deque([0, 0])
 
     glfw.make_context_current(window)
+
+    kinect()
+
+    import pyk4a
+    from pyk4a import PyK4APlayback
 
 
 
@@ -627,7 +664,7 @@ def main():
     )
 
 
-
+    useKinect = False
 
 
     while not glfw.window_should_close(window):
@@ -642,8 +679,23 @@ def main():
                 if filemode == 1:
                     cap, width, height = openCamera(cameraList[currentCamera])
                 elif filemode == 2:
-                    cap, width, height = openVideo(fileList[currentFile])
-                    numberOfFrames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    if (fileList[currentFile] == 'data\\vid6.mkv'):
+                        useKinect = True
+                        playback = PyK4APlayback(fileList[currentFile])
+                        playback.open()
+                        capture = playback.get_next_capture()
+                        if (playback.configuration['color_resolution'] == 2):
+                            width = 1920
+                            height = 1080
+                        if (playback.configuration['depth_mode'] == 2):
+                            width_d = 640
+                            height_d = 576
+                        #cv2.imshow("Color", cv2.imdecode(capture.color, cv2.IMREAD_COLOR))
+                        #cv2.waitKey(1)
+                        numberOfFrames = playback.length
+                    else:
+                        cap, width, height = openVideo(fileList[currentFile])
+                        numberOfFrames = cap.get(cv2.CAP_PROP_FRAME_COUNT)
 
 
                 textureDict = generateTextures(textureDict, numberOfImages, width, height)
@@ -653,8 +705,26 @@ def main():
                 resetVideoSource = False
 
         else:
-            ret, frame = cap.read()
-            blank_frame = np.zeros_like(frame)
+            if not useKinect:
+                ret, frame = cap.read()
+                blank_frame = np.zeros_like(frame)
+            else:
+                try:
+                    print("capturing")
+                    capture = playback.get_next_capture()
+                    if capture.color is not None:
+                        frame = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
+                        frame = cv2.flip(frame, 0)
+                        blank_frame = np.zeros_like(frame)
+                        ret = True
+                    else:
+                        ret = False
+                except EOFError:
+                    break
+
+               # cv2.imshow("Color", frame)
+               # cv2.waitKey(1)
+                
 
             if imgui.is_mouse_clicked():
                 if not imgui.is_any_item_active():
@@ -677,6 +747,9 @@ def main():
                 img_data = np.array(frame.data, np.uint8)
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
                 glGenerateMipmap(GL_TEXTURE_2D)
+
+                print("uploading")
+
                 # inputImage = np.array(cv2.resize(((np.array(frame.data, np.float32) / 255.0) - (0.485, 0.456, 0.406)) / (0.229, 0.224, 0.225), (320, 512)), dtype=np.float32)
 
                 # res = inference(engine, segContext, inputImage.reshape(-1), out_cpu, in_gpu, out_gpu, stream)
@@ -751,12 +824,14 @@ def main():
 
                 if (doFilterEnabled):
 
+                    print("filtering")
 
                     for lvl in range(4, -1, -1):
                         do_gradFilter(gradShader, textureDict, lvl, width, height)
                         do_inverseSearch(inverseSearchShader, textureDict, lvl, width, height)
                         do_densify(denseShader, textureDict, lvl, width, height)
                         #do_densify(densifyShader, densifiactionFBO, textureList, lvl, width, height)
+
 
                         currentFlow = do_summing(sumShader, textureDict, bufferDict, lvl, width, height, xPos, yPos)
                         
@@ -766,7 +841,8 @@ def main():
                             flow_values.pop()
 
 
-                    
+                    print("graphing")
+
    
 
                 w, h = glfw.get_framebuffer_size(window)
@@ -796,7 +872,7 @@ def main():
 
                 # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
-
+                print("rendering")
 
                 # set second draw call's drawing location (we've shifted accros by width / 4)
                 xpos = 0                
@@ -858,6 +934,7 @@ def main():
                 glGenerateMipmap(GL_TEXTURE_2D)
 
 
+                print("mipmapping")
 
 
 
@@ -897,6 +974,8 @@ def main():
                 sourceAvailable  = True
                 frameCounter = 0
 
+        print("ui")
+
 
         #changedR, sliderRValue = imgui.slider_int("sliceR", sliderRValue, min_value=0, max_value=5)
         changedG, frameCounter = imgui.slider_int("frame", frameCounter, min_value=0, max_value=numberOfFrames)
@@ -906,21 +985,27 @@ def main():
         _, getPose = imgui.checkbox("run pose", getPose)
 
         if changedG:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frameCounter)
+            if not useKinect:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frameCounter)
+            else:
+                playback.seek(frameCounter)
 
         imgui.end()
 
-        meanFlow = np.mean(np.array(flow_values))
-        stdDevFlow = np.std(np.array(flow_values))
-        smooth_flow_values = uniform_filter1d(flow_values, 30)
+        # meanFlow = np.mean(np.array(flow_values))
+        # stdDevFlow = np.std(np.array(flow_values))
+        # smooth_flow_values = uniform_filter1d(flow_values, 30)
 
-        imgui.begin("plotting")
-        imgui.plot_lines("flow", array('f', smooth_flow_values), 1000, 0, None, meanFlow - (1.5 * stdDevFlow), meanFlow + (1.5 * stdDevFlow), (500, 100))
-        imgui.end()
+        # imgui.begin("plotting")
+        # imgui.plot_lines("flow", array('f', smooth_flow_values), 1000, 0, None, meanFlow - (1.5 * stdDevFlow), meanFlow + (1.5 * stdDevFlow), (500, 100))
+        # imgui.end()
 
         imgui.render()
 
         impl.render(imgui.get_draw_data())
+
+        print("plotting")
+
 
         #print((time.perf_counter() - sTime) * 1000)
 
@@ -931,10 +1016,15 @@ def main():
 
         if frameCounter >= numberOfFrames:
             frameCounter = 0
+            if (useKinect):
+                playback.seek(frameCounter)
 
 
     glfw.terminate()
-    cap.release()
+    if not useKinect:
+        cap.release()
+    else:
+        playback.close()
 
 if __name__ == "__main__":
     main()
