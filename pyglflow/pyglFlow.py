@@ -381,6 +381,7 @@ def generateTextures(textureDict, numImages, width, height):
     textureDict['sparseFlowMap'] = createTexture(textureDict['sparseFlowMap'], GL_TEXTURE_2D, GL_RGBA32F, maxLevels, int(width / 4), int(height / 4), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     textureDict['blankFlowMap'] = createTexture(textureDict['blankFlowMap'], GL_TEXTURE_2D, GL_RGBA32F, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
     textureDict['skeletonColor'] = createTexture(textureDict['skeletonColor'], GL_TEXTURE_2D, GL_RGB8, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
+    textureDict['depthInColor'] = createTexture(textureDict['depthInColor'], GL_TEXTURE_2D, GL_R16, numLevels, int(width), int(height), 1, GL_LINEAR_MIPMAP_NEAREST, GL_LINEAR)
 
     blankData = np.zeros(int(width*height* 4), dtype='float32')
 
@@ -445,9 +446,7 @@ def main():
     glfw.make_context_current(window)
 
     kinect()
-
     import pyk4a
-    from pyk4a import PyK4APlayback
 
 
 
@@ -515,7 +514,8 @@ def main():
         'nextFlowMap' : nextFlowMap, 
         'sparseFlowMap' : sparseFlowMap, 
         'skeletonColor' : skeletonColor,
-        'blankFlowMap' : -1
+        'blankFlowMap' : -1,
+        'depthInColor' : -1,
     }
 
     bufferDict = {
@@ -597,6 +597,7 @@ def main():
     sliderG_loc = glGetUniformLocation(shader, "sliderG")
     sliderB_loc = glGetUniformLocation(shader, "sliderB")
     renderType_loc = glGetUniformLocation(shader, "renderType")
+    depthRange_loc = glGetUniformLocation(shader, "depthRange")
 
 
     # make some default background color
@@ -608,6 +609,9 @@ def main():
     sliderBValue = 0
 
     frameCounter = 0
+
+    depthRangeSliderMin = 0.0
+    depthRangeSliderMax = 1.0
 
     #default to not running any filters
     doFilterEnabled = False
@@ -621,7 +625,7 @@ def main():
         fileList.append(str(x))
 
     currentCamera = 0
-    cameraList = ['0', '1', '2', '3', '4']
+    cameraList = ['0', '1', '2', '3', 'kinect']
     resetVideoSource = True
     sourceAvailable = False
 
@@ -677,9 +681,23 @@ def main():
             if sourceAvailable:
                 reset()
                 if filemode == 1:
-                    cap, width, height = openCamera(cameraList[currentCamera])
+                    if (cameraList[currentFile] == 'kinect'):
+                        from pyk4a import Config, PyK4A
+                        useKinect = True
+                        k4a = PyK4A(
+                            Config(
+                                color_resolution=pyk4a.ColorResolution.RES_1080P,
+                                depth_mode=pyk4a.DepthMode.NFOV_UNBINNED,
+                                synchronized_images_only=True,
+                            )
+                        )
+                        k4a.start()
+                        capture = k4a.get_capture()
+                    else:
+                        cap, width, height = openCamera(cameraList[currentCamera])
                 elif filemode == 2:
                     if (fileList[currentFile] == 'data\\vid6.mkv'):
+                        from pyk4a import PyK4APlayback
                         useKinect = True
                         playback = PyK4APlayback(fileList[currentFile])
                         playback.open()
@@ -709,21 +727,33 @@ def main():
                 ret, frame = cap.read()
                 blank_frame = np.zeros_like(frame)
             else:
-                try:
-                    print("capturing")
-                    capture = playback.get_next_capture()
+                if filemode == 1:
+                    capture = k4a.capture()
                     if capture.color is not None:
-                        frame = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
-                        frame = cv2.flip(frame, 0)
-                        blank_frame = np.zeros_like(frame)
+                        frame = capture.color
                         ret = True
                     else:
                         ret = False
-                except EOFError:
-                    break
+                elif filemode == 2:
+                    try:
+                        capture = playback.get_next_capture()
+                        if capture.color is not None:
+                            frame = cv2.imdecode(capture.color, cv2.IMREAD_COLOR)
+                            frame = cv2.flip(frame, 0)
+                            blank_frame = np.zeros_like(frame)
+                            ret = True
+                        if capture.transformed_depth is not None:
+                            #cv2.imshow("depth", capture.transformed_depth)
+                            #cv2.waitKey(1)
+                            glActiveTexture(GL_TEXTURE0)
+                            glBindTexture(GL_TEXTURE_2D, textureDict['depthInColor'])
+                            glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_RED, GL_UNSIGNED_SHORT, np.array(capture.transformed_depth))
+                        else:
+                            ret = False
+                    except EOFError:
+                        break
 
-               # cv2.imshow("Color", frame)
-               # cv2.waitKey(1)
+
                 
 
             if imgui.is_mouse_clicked():
@@ -748,7 +778,6 @@ def main():
                 glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, int(width), int(height), GL_BGR, GL_UNSIGNED_BYTE, img_data)
                 glGenerateMipmap(GL_TEXTURE_2D)
 
-                print("uploading")
 
                 # inputImage = np.array(cv2.resize(((np.array(frame.data, np.float32) / 255.0) - (0.485, 0.456, 0.406)) / (0.229, 0.224, 0.225), (320, 512)), dtype=np.float32)
 
@@ -824,7 +853,6 @@ def main():
 
                 if (doFilterEnabled):
 
-                    print("filtering")
 
                     for lvl in range(4, -1, -1):
                         do_gradFilter(gradShader, textureDict, lvl, width, height)
@@ -841,7 +869,6 @@ def main():
                             flow_values.pop()
 
 
-                    print("graphing")
 
    
 
@@ -872,7 +899,6 @@ def main():
 
                 # glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
-                print("rendering")
 
                 # set second draw call's drawing location (we've shifted accros by width / 4)
                 xpos = 0                
@@ -884,6 +910,10 @@ def main():
                 glBindTexture(GL_TEXTURE_2D, textureDict['nextFlowMap'])
                 glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
 
+                glActiveTexture(GL_TEXTURE4)
+                glBindTexture(GL_TEXTURE_2D, textureDict['depthInColor'])
+                glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, None)
+
                 glUniform1i(sliderR_loc, sliderRValue)
 
 
@@ -891,6 +921,8 @@ def main():
                 xpos = float(w) / 2.0
                 glViewport(int(xpos), int(ypos), int(xwidth),h)
                 glUniform1i(renderType_loc, 3)
+
+                glUniform2f(depthRange_loc, depthRangeSliderMin, depthRangeSliderMax)
 
                 glActiveTexture(GL_TEXTURE2)
                 glBindTexture(GL_TEXTURE_2D, textureDict['nextGradMap'])
@@ -934,7 +966,6 @@ def main():
                 glGenerateMipmap(GL_TEXTURE_2D)
 
 
-                print("mipmapping")
 
 
 
@@ -974,8 +1005,8 @@ def main():
                 sourceAvailable  = True
                 frameCounter = 0
 
-        print("ui")
-
+        changedDepth, depthRangeSliderMin = imgui.slider_float("depthMin", depthRangeSliderMin, min_value=0, max_value=1.0)
+        changedDepth, depthRangeSliderMax = imgui.slider_float("depthMax", depthRangeSliderMax, min_value=0, max_value=1.0)
 
         #changedR, sliderRValue = imgui.slider_int("sliceR", sliderRValue, min_value=0, max_value=5)
         changedG, frameCounter = imgui.slider_int("frame", frameCounter, min_value=0, max_value=numberOfFrames)
@@ -992,7 +1023,7 @@ def main():
 
         imgui.end()
 
-        # meanFlow = np.mean(np.array(flow_values))
+        # meanFlow = np.mean(np.array(flow_values)) # this can cuase crashes .... not sure why
         # stdDevFlow = np.std(np.array(flow_values))
         # smooth_flow_values = uniform_filter1d(flow_values, 30)
 
@@ -1004,7 +1035,6 @@ def main():
 
         impl.render(imgui.get_draw_data())
 
-        print("plotting")
 
 
         #print((time.perf_counter() - sTime) * 1000)
